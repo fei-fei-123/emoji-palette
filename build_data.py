@@ -27,7 +27,7 @@ EMOJI_TEST_VERSIONS = ("17.0", "16.0")
 URL_EMOJI_TEST = "https://www.unicode.org/Public/emoji/{ver}/emoji-test.txt"
 URL_CLDR_ANNOT = (
     "https://raw.githubusercontent.com/unicode-org/cldr-json/main/"
-    "cldr-json/cldr-annotations-full/main/{lang}/annotations.json"
+    "cldr-json/cldr-annotations-full/annotations/{lang}/annotations.json"
 )
 # emojilib 仓库路径历史上有变动,dist/ 与根路径都试一次
 URL_EMOJILIB = (
@@ -115,13 +115,18 @@ def parse_emoji_test(path: Path) -> list[dict]:
 
 
 def load_annotations(path: Path) -> dict[str, dict]:
-    """CLDR annotations.json → {归一化码点: {"default": [...], "tts": [...]}}。"""
+    """CLDR annotations.json → {归一化码点: {"default": [...], "tts": [...]}}。
+
+    注意:CLDR 的键是 emoji 字符本身(非十六进制),逐字符转码点后归一化,
+    变体选择符/ZWJ 一并转出,与 emoji-test 的码点序列天然对齐。
+    """
     anns = json.loads(path.read_text(encoding="utf-8"))["annotations"]["annotations"]
     out: dict[str, dict] = {}
     for key, val in anns.items():
+        cp_str = " ".join(f"{ord(ch):X}" for ch in key)
         defaults = [w.strip().lower() for w in val.get("default", []) if not RE_PAREN.search(w)]
         tts = [t.strip() for t in val.get("tts", []) if t.strip()]
-        out[norm_cp(key)] = {"default": defaults, "tts": tts}
+        out[norm_cp(cp_str)] = {"default": defaults, "tts": tts}
     return out
 
 
@@ -161,9 +166,8 @@ def _dedup(items: list[str]) -> list[str]:
 
 
 def build(offline: bool, refresh: bool) -> None:
-    from emoji_palette.groups import group_zh
-
     sys.path.insert(0, str(ROOT / "src"))  # 复用运行期包
+    from emoji_palette.groups import group_zh
 
     print("① 获取数据源 ...")
     et_path: Path | None = None

@@ -12,15 +12,32 @@
 
 | 里程碑 | 内容 | 验收标准 | 状态 |
 |---|---|---|---|
-| M0 | build_data.py + 索引 | `data/index.json` ≥3700 条;💩 条目含 zh/en/py/abbr 四类词;单测过 | ⬜ 未开始 |
+| M0 | build_data.py + 索引 | `data/index.json` ≥3700 条;💩 条目含 zh/en/py/abbr 四类词;单测过 | ✅ 完成(2026-09-30) |
 | M1 | 热键 + 面板 + 搜索 + 上屏 | `Alt+E` 呼出 <50ms;打 `shi` 首位见 💩;Enter 上屏进记事本;Esc 即走 | ⬜ 未开始 |
 | M2 | 分类浏览 + 频率学习 + 信息栏 | 8 分类可切换;常用栏随使用更新 | ⬜ 未开始 |
 | M3 | 右键别名 + 文本扩展 + IME 检测 | `::shit ␣`→💩(英文态);中文 IME 开启时扩展自动失效不干扰 | ⬜ 未开始 |
 | M4 | 托盘 + 设置窗 + 自启动 + 打包 | PyInstaller 单 exe 可用;开机自启可开关;热键可改 | ⬜ 未开始 |
 
-**当前:** 初始化完成,即将启动 M0(数据管道)。
+**当前:** M0 完成,下一步 M1(热键 + 面板 + 搜索 + 上屏,最小可用产品)。
 
 ## 开发日志
+
+### 2026-09-30 · M0 数据管道完成 ✅
+
+**产出:**
+- `data/index.json`:**3781 条**(≥3700 ✓,emoji-test 16.0,1217 KB,跳过 Component 组、仅 fully-qualified);
+- 💩 条目四类词齐全:`kw_zh=[大便,好臭,屎,粑粑…]`、`kw_en=[poo,poop,shit,crap…]`、`kw_py=[dabian,shi,baba…]`、`kw_abbr=[db,s,bb…]` —— FR3.1 要求的 屎/shit/shi/bb 四路命中数据面就绪;
+- 测试 7 passed:拼音推导、码点归一化、数量、字段完整性(含 group_zh 全量映射)、码点去重、💩 四类词、关键词长度一致性。
+
+**数据源踩坑(重要):**
+1. cldr-json 仓库已改版:没有 `main/` 层,现路径为 `cldr-json/cldr-annotations-full/annotations/{lang}/annotations.json`(DESIGN.md §4.1 中的路径已过时);
+2. CLDR 注解的键是 **emoji 字符本身**而非十六进制码点 → 逐字符 `ord()` 转码点再归一化,变体选择符/ZWJ 一并转出,与 emoji-test 码点序列天然对齐;
+3. emojilib 实际路径 `dist/emoji-en-US.json`,v3 格式为 字符→关键词数组(加载器已兼容新旧格式);raw.githubusercontent 偶发瞬断,curl --retry 可作缓存预热兜底;
+4. emoji 17.0 的 emoji-test.txt 尚未发布(404),按设计回退 16.0 生效。
+
+**设计偏差备忘:**
+- FR3.1 示例中的 `bianbian` 未覆盖(CLRD zh 对 💩 给的是 粑粑→`baba` 而非 便便)→ M3 用户别名机制兜底,不改数据管道;
+- 新增 `ver` 字段(E 版本号,取自行注释)——为坑 #12「隐藏本机不支持的版本」预留。
 
 ### 2026-09-30 · 依赖环境攻坚(conda DLL 劫持 → uv 纯净环境)
 
