@@ -1,0 +1,4 @@
+# uv 项目级配置:固定阿里云镜像(清华镜像对 PySide6 同步异常)
+[[index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
