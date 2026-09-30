@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# 数据:原始缓存与构建产物均不入库(DESIGN.md §9)
+data/raw/
+data/index.json
+
+# 打包产物
+build/
+dist/
+*.spec.bak
+
+# IDE
+.idea/
+.vscode/
