@@ -7,3 +7,4 @@ pypinyin>=0.53
 pyinstaller>=6.10
 # 开发/测试
 pytest>=8.0
+ruff>=0.8

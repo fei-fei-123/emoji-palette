@@ -1,0 +1,49 @@
+{
+    // VS Code 调试配置。解释器统一用 .venv(uv 托管 CPython 3.12,
+    // 环境坑见 docs/DEVLOG.md「依赖环境攻坚」)。
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "▶ 运行主程序 (python -m emoji_palette)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "emoji_palette",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src",
+                "PYTHONUTF8": "1"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "⚙ 构建数据索引 (build_data.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/build_data.py",
+            "cwd": "${workspaceFolder}",
+            "env": { "PYTHONUTF8": "1" },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "⚙ 构建数据索引 (离线缓存)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/build_data.py",
+            "args": ["--offline"],
+            "cwd": "${workspaceFolder}",
+            "env": { "PYTHONUTF8": "1" },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "✅ pytest 全部测试",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": ["-v", "${workspaceFolder}/tests"],
+            "cwd": "${workspaceFolder}",
+            "env": { "PYTHONUTF8": "1" },
+            "console": "integratedTerminal"
+        }
+    ]
+}

@@ -15,6 +15,8 @@ build/
 dist/
 *.spec.bak
 
-# IDE
+# IDE(.vscode 仅保留 launch/settings 两件套)
 .idea/
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json

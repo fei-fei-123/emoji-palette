@@ -1,0 +1,10 @@
+{
+    // 解释器固定为项目 venv(勿用 conda Python,见 docs/DEVLOG.md)
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": ["tests"],
+    "[python]": {
+        "editor.defaultFormatter": null,
+        "editor.formatOnSave": false
+    }
+}
