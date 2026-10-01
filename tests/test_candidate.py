@@ -1,8 +1,7 @@
 """候选条 CandidateBar 状态机测试(offscreen)。
 
-沿 M2 决议:不测真实激活/点击穿透,测状态驱动(update/move/no-match/
-selected/item_at/close)与布局尺寸;Win32 轮询定时器在 offscreen 下
-只验证启停副作用,GetAsyncKeyState 读数不参与断言。
+不测真实激活/点击穿透,测状态驱动与布局尺寸;点击外部检测
+只验证定时器启停,GetAsyncKeyState 读数不参与断言。
 """
 
 import copy
@@ -40,7 +39,7 @@ def test_update_defaults_when_buf_empty():
 
 
 def test_update_no_match_keeps_bar_open():
-    """无命中:条不关,进入无匹配态(DEVTest)。"""
+    """无命中:条不关,进入无匹配态。"""
     bar = _bar()
     bar.set_default_items(_items("😀"))
     bar.update_candidates([], "zzz")
@@ -95,9 +94,8 @@ def test_close_bar_stops_polling():
 
 
 def test_update_candidates_schedules_repaint():
-    """真机 BUG 回归:逐键 update 只改数据不重绘(条宽不变时无 resize,
-    layered 窗 move 不重绘;grab() 截图强制整幅渲染会掩盖)—— 必须
-    显式调度 update()。实例级遮蔽捕获调用。"""
+    """回归:逐键 update 只改数据不重绘(条宽不变时无 resize,layered 窗
+    move 不重绘),必须显式调度 update()。实例级遮蔽捕获调用。"""
     bar = _bar()
     bar.set_default_items(_items("😀"))
     bar.update_candidates(None, "")

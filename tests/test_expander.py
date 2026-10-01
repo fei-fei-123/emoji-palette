@@ -1,9 +1,8 @@
-"""文本扩展状态机转换测试(表驱动,DESIGN.md §6.6,M5 候选条重设计)。
+"""文本扩展状态机转换测试(表驱动)。
 
-覆盖:IDLE→ARMED→REC、REC 抑制矩阵全分支(字母/数字/空格/enter/Esc/
-↑↓/←→/Backspace/修饰键)、缓冲超限、门禁(IME/黑名单/开关)进出复位、
-has_candidates 回写联动、prefix_candidates 候选源(含 `shi`→💩 BUG① 回归)、
-set_aliases 热更、config 别名读写往返、钩子返回值语义。
+覆盖:IDLE→ARMED→REC、REC 按键规则全分支、缓冲超限、
+门禁进出复位、has_candidates 回写联动、候选源、
+别名热更、config 读写往返、钩子返回值语义。
 """
 
 from pathlib import Path
@@ -43,7 +42,7 @@ def _rec(machine: Expander, buf: str = "") -> None:
         machine.on_key(ch, now=_T)
 
 
-# ── §6.6 状态转换:武装与事件流 ─────────────────────────────────
+# ── 状态转换:武装与事件流 ─────────────────────────────────
 
 
 def test_prefix_arms_and_emits_show():
@@ -158,9 +157,8 @@ def test_modifier_and_other_keys_close():
 
 
 def test_modifier_streams_do_not_break_state():
-    """BUG① 真机回归:`:` 需按住 Shift 输入,两个前缀键之间的 shift
-    事件(松开重按 / 按住触发的系统自动重复)不得打断武装;REC 中
-    修饰键放行且不收条。E2E 程序化驱动一气呵成按住 Shift 测不出此题。"""
+    """回归:`:` 需按住 Shift 输入,两个前缀键之间的 shift 事件
+    (松开重按 / 系统自动重复)不得打断武装;REC 中修饰键放行且不收条。"""
     m = _machine()
     assert m.on_key(":", now=_T) == (False, None)
     assert m.on_key("shift", now=_T) == (False, None)      # 不回 IDLE
@@ -195,7 +193,7 @@ def test_set_prefix_resets():
 
 
 def test_machine_exception_passes_through():
-    """状态机内异常默认放行,不卡键盘(§12)。"""
+    """状态机内异常默认放行,不卡键盘。"""
     def boom() -> bool:
         raise RuntimeError("gate 崩了")
     m = Expander(boom, "::")
@@ -204,7 +202,7 @@ def test_machine_exception_passes_through():
     assert m.on_key("space", now=_T) == (False, None)
 
 
-# ── 门禁(IME / 黑名单 / 总开关,§6.5)───────────────────────────
+# ── 门禁(IME / 黑名单 / 总开关)──────────────────────────
 
 
 def test_gate_blocks_arming():
@@ -240,7 +238,7 @@ def test_gate_recheck_throttled():
     assert len(calls) == 1  # 仅武装时查询;REC 内未到复查窗口
 
 
-# ── 候选数据源(search.prefix_candidates,含 BUG① 回归)────────
+# ── 候选数据源(search.prefix_candidates)──────────────────
 
 
 def _mini_entries() -> list[dict]:
@@ -253,7 +251,7 @@ def _mini_entries() -> list[dict]:
 
 
 def test_prefix_candidates_pinyin_shi_hits_poo():
-    """BUG① 回归:`shi`(kw_py)必须出 💩(M4 静默替换表不含 kw_py)。"""
+    """``shi``(kw_py)必须命中 💩。"""
     idx = SearchIndex(_mini_entries(), {})
     cands = idx.prefix_candidates("shi")
     chars = [e["char"] for e, _t in cands]
@@ -290,7 +288,7 @@ def test_prefix_candidates_frequency_weighting():
 
 
 def test_set_aliases_updates_search():
-    """set_aliases 后搜索立即命中新别名(FR3.5 搜索侧)。"""
+    """set_aliases 后搜索立即命中新别名。"""
     idx = SearchIndex(_mini_entries(), {})
     assert idx.query("翔") == []
     idx.set_aliases({POO: ["翔", "py"]})
@@ -302,8 +300,8 @@ def test_set_aliases_updates_search():
 
 
 def test_hook_return_semantics():
-    """_on_event 返回 True=放行 / False=拦截(_winkeyboard.prepare_intercept
-    约定,与直觉相反 —— M3 真机 E2E 踩坑:按「True=吞」实现会吞掉所有键)。"""
+    """_on_event 返回 True=放行 / False=拦截(_winkeyboard 约定,
+    与直觉相反;按「True=吞」实现会吞掉所有键)。"""
     from types import SimpleNamespace
 
     from emoji_palette.expander import ExpandBridge, ExpanderHook
@@ -328,7 +326,7 @@ def test_hook_return_semantics():
     assert kinds == ["show", "update", "update", "update", "commit"], kinds
 
 
-# ── config.aliases 读写往返(§4.3)───────────────────────────────
+# ── config.aliases 读写往返 ────────────────────────────────
 
 
 def test_alias_roundtrip(tmp_path: Path, monkeypatch):

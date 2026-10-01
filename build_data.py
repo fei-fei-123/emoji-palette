@@ -1,11 +1,11 @@
-"""数据管道:下载 CLDR/emoji-test → 解析 → pypinyin 拼音 → data/index.json。
+"""数据管道:下载 CLDR/emoji-test/emojilib → 解析 → 拼音 → data/index.json。
 
 用法:
     python build_data.py            # 在线下载(优先 data/raw 缓存)
     python build_data.py --offline  # 仅用缓存构建,缺缓存即报错
     python build_data.py --refresh  # 忽略缓存强制重新下载
 
-产出规格见 DESIGN.md §4.2。运行期零网络,本脚本仅构建期使用(pypinyin 仅此处依赖)。
+运行期零网络,本脚本仅构建期使用(pypinyin 仅此处依赖)。
 """
 
 import argparse
@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent
 RAW_DIR = ROOT / "data" / "raw"
 OUT_PATH = ROOT / "data" / "index.json"
 
-# emoji-test 版本探测顺序:17.0 存在则用,否则回退 16.0(DESIGN.md §4.1)
+# emoji-test 版本探测顺序:新版本存在则用,否则回退
 EMOJI_TEST_VERSIONS = ("17.0", "16.0")
 URL_EMOJI_TEST = "https://www.unicode.org/Public/emoji/{ver}/emoji-test.txt"
 URL_CLDR_ANNOT = (
@@ -49,16 +49,16 @@ RE_PAREN = re.compile(r"[()]")
 
 
 def norm_cp(cp: str) -> str:
-    """码点串归一化用于匹配:大小写统一、`-` 视同空格、去掉前导零。"""
+    """码点串归一化:大小写统一、`-` 视同空格、去掉前导零。"""
     return " ".join(t.upper().lstrip("0") or "0" for t in cp.replace("-", " ").split())
 
 
 def fetch(urls: str | tuple[str, ...], cache_name: str, offline: bool, refresh: bool,
           required: bool = True) -> Path | None:
-    """下载到 data/raw 缓存并返回路径。
+    """下载到 data/raw 缓存并返回路径;已缓存且非 --refresh 时直接复用。
 
-    已缓存且非 --refresh 时直接复用;--offline 缺缓存/下载失败:
-    required 为真时报错退出,否则返回 None(可选数据源降级)。
+    --offline 缺缓存/下载失败:required 为真时报错退出,
+    否则返回 None(可选数据源降级)。
     """
     dest = RAW_DIR / cache_name
     if dest.exists() and not refresh:
@@ -117,8 +117,8 @@ def parse_emoji_test(path: Path) -> list[dict]:
 def load_annotations(path: Path) -> dict[str, dict]:
     """CLDR annotations.json → {归一化码点: {"default": [...], "tts": [...]}}。
 
-    注意:CLDR 的键是 emoji 字符本身(非十六进制),逐字符转码点后归一化,
-    变体选择符/ZWJ 一并转出,与 emoji-test 的码点序列天然对齐。
+    CLDR 的键是 emoji 字符本身(非十六进制),逐字符转码点后归一化,
+    与 emoji-test 的码点序列天然对齐。
     """
     anns = json.loads(path.read_text(encoding="utf-8"))["annotations"]["annotations"]
     out: dict[str, dict] = {}
@@ -145,7 +145,7 @@ def load_emojilib(path: Path) -> dict[str, list[str]]:
 
 
 def pinyin_words(zh_words: list[str]) -> tuple[list[str], list[str]]:
-    """kw_zh → (kw_py 整词拼音连写, kw_abbr 逐音节首字母)。见 DESIGN.md §4.2。"""
+    """kw_zh → (整词拼音连写, 逐音节首字母缩写)。"""
     pys: list[str] = []
     abbrs: list[str] = []
     for word in zh_words:
@@ -242,7 +242,7 @@ def build(offline: bool, refresh: bool) -> None:
 
 
 def main() -> None:
-    # Windows 控制台可能为 GBK,打印 emoji/生僻词时防 UnicodeEncodeError
+    # Windows 控制台可能为 GBK,打印 emoji 时防 UnicodeEncodeError
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description="Emoji Palette 数据索引构建")

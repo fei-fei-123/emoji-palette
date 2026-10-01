@@ -1,15 +1,7 @@
-"""表情面板 UI(DESIGN.md §5)。
+"""表情面板 UI:搜索框 + 分类栏 + 网格 + 信息栏;预创建、show/hide 切换。
 
-M2 形态:搜索框 + 左侧分类栏(常用 + 9 组)+ 网格 + 底部信息栏。
-搜索框有文字 = 搜索模式(分类栏淡化,§5 允许隐藏或淡化);
-清空 = 回分类浏览;搜索模式下数字 1-9 直选前 9 项(高频加速 ——
-直选与「数字是搜索文本」的消歧:仅搜索模式占用)。
-常用栏 = 频率 top(recent_count)+ 固定常用条补足,每次呼出刷新。
-M3 增:右键菜单管理别名(FR3.5,即时生效)、信息栏显示已配别名。
-预创建、仅 show/hide 切换(FR1.3);emoji 字体显式 Segoe UI Emoji(坑 #5)。
-M5 输入模型:默认焦点 = 面板自身(导航模式:←→ 横移 / ↑↓ 纵移 / +− 切类),
-打字自动进搜索框(输入模式);↑↓ 从框回面板;切类先清空搜索文本。
-热键末键残留过滤(BUG②);keep-open 提交 + 失活豁免(§5 上屏后不关面板)。
+输入模型:默认焦点在面板自身(导航模式:←→ 横移 / ↑↓ 纵移 / +− 切类),
+打字自动进搜索框(输入模式);搜索模式下数字 1-9 直选前 9 项。
 """
 
 import time
@@ -56,7 +48,7 @@ from emoji_palette import config, sender
 from emoji_palette.groups import GROUP_ZH
 from emoji_palette.settings_ui import keyboard_to_qt
 
-# 空查询时的固定常用条(常用栏冷启动底料,频率 top 排其前);
+# 空查询时的固定常用条(常用栏冷启动底料)。
 # 用元组而非字符串:❤️ 等含变体选择符的序列不能按码点拆开迭代
 _STRIP = ("😀", "😁", "😂", "🤣", "😊", "😍", "🥰", "😘", "😜", "🤔",
           "😎", "😭", "😡", "👍", "👏", "🙏", "💪", "🎉", "❤️", "🔥",
@@ -111,7 +103,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 """
 
-# 浅色主题(FR5.2 外观设置;彩色 emoji 字形不受前景色影响,仅容器换肤)
+# 浅色主题(彩色 emoji 字形不受前景色影响,仅容器换肤)
 LIGHT_QSS = """
 #searchEdit {
     background: rgba(255, 255, 255, 230);
@@ -155,9 +147,8 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 """
 
-# 根容器绘制色(paintEvent 自绘,主题键同 _DELEGATE_COLORS):
-# 本环境实测(PySide6 6.11.2/Win10)顶层 WA_TranslucentBackground 窗口
-# 的 QSS 背景任何写法都不绘制(子控件正常),必须 QPainter 画 —— 坑 #13
+# 根容器绘制色(paintEvent 自绘):顶层 WA_TranslucentBackground 窗口
+# 的 QSS 背景不绘制,且 alpha=0 区域会点击穿透 —— 必须真的画出来
 _PANEL_BG: dict[str, tuple[int, int, int, int]] = {
     "dark": (30, 30, 30, 235),
     "light": (245, 245, 245, 242),
@@ -170,11 +161,7 @@ _PANEL_RADIUS = 8.0
 
 
 class _EmojiDelegate(QStyledItemDelegate):
-    """网格项绘制:emoji 字符居中 + 圆角选中高亮(不用默认文本渲染)。
-
-    选中块/回退文字色随主题传入(彩色 emoji 字形不受前景色影响,
-    前景色只作用于无彩色字形的回退渲染)。
-    """
+    """网格项绘制:emoji 字符居中 + 圆角选中高亮。"""
 
     def __init__(self, font: QFont, sel_color: QColor, fg_color: QColor,
                  parent: QObject | None = None) -> None:
@@ -202,7 +189,7 @@ class EmojiPanel(QWidget):
     """表情面板:预创建、show/hide 切换;popup 记录注入目标窗口。"""
 
     aliases_changed = Signal()  # 别名编辑落盘后通知(app 重建扩展匹配表)
-    fallback_notice = Signal(str)  # 剪贴板降级发生(托盘气泡一次,FR6.4)
+    fallback_notice = Signal(str)  # 剪贴板降级发生(托盘气泡用)
 
     def __init__(self, cfg: dict, index,
                  aliases: dict[str, list[str]] | None = None) -> None:
@@ -213,18 +200,14 @@ class EmojiPanel(QWidget):
         self._aliases = aliases if aliases is not None else {}  # 共享引用,编辑即改
         self._target_hwnd = 0
         self._popup_ts = 0.0  # 呼出时刻(monotonic),失活宽限用
-        self._hold_grace = 0.0  # keep-open 提交的失活豁免截止(U4)
-        self._tail: dict | None = None  # 热键末键残留过滤(BUG②)
-        # 默认焦点 = 面板自身(导航模式):←→ 横移 / ↑↓ 纵移,
-        # 打字自动转进搜索框(输入模式)—— M5 交互模型
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._hold_grace = 0.0  # keep-open 提交的失活豁免截止
+        self._tail: dict | None = None  # 热键末键残留过滤状态
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # 默认焦点 = 面板自身(导航模式)
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint
                             | Qt.WindowType.Tool)
-        # 半透明 + 圆角根背景走 paintEvent 自绘(坑 #13):Windows 对 layered
-        # 窗逐像素命中测试,alpha=0 区域滚轮/点击穿透到后方应用 —— 根背景
-        # 必须真的画出来,整窗 alpha>0 后穿透即消失
+        # 半透明 + 圆角根背景走 paintEvent 自绘(见 _PANEL_BG 说明)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         p = cfg["panel"]
         self.setFixedSize(QSize(int(p["width"]), int(p.get("height", 440))))
@@ -257,8 +240,7 @@ class EmojiPanel(QWidget):
         self.grid.setWordWrap(False)
         self.grid.setWrapping(True)
         self.grid.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        # 网格自身不画底、不清像素(坑 #13 附带发现:QSS background:transparent
-        # 会把下层像素 alpha 抹零;关 autofill 则完全不介入,根背景透出)
+        # 网格自身不画底(根背景透出;QSS transparent 会把下层像素 alpha 抹零)
         self.grid.setAutoFillBackground(False)
         self.grid.viewport().setAutoFillBackground(False)
         self.grid.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
@@ -266,7 +248,6 @@ class EmojiPanel(QWidget):
         self.grid.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._apply_grid_metrics()
         self.grid.itemClicked.connect(self._on_item_clicked)
-        # 右键菜单:别名管理 + 复制(FR3.5)
         self.grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.grid.customContextMenuRequested.connect(self._on_context_menu)
 
@@ -290,7 +271,7 @@ class EmojiPanel(QWidget):
         body.addWidget(self.grid, 1)
         root.addLayout(body)
 
-        # ── 底部信息栏:当前项大图 + 中文名·英文名·码点(§5)───────
+        # ── 底部信息栏:当前项大图 + 中文名·英文名·码点 ─────────────
         self.preview = QLabel()
         self.preview.setObjectName("previewLabel")
         preview_font = QFont("Segoe UI Emoji")
@@ -310,25 +291,20 @@ class EmojiPanel(QWidget):
         bar.addWidget(self.info_label, 1)
         root.addWidget(info_bar)
 
-        # 固定常用条底料(索引中未收录的字符跳过;豆腐隐藏在 app 层已过滤)
+        # 固定常用条底料(索引中未收录的字符跳过)
         self._default_entries = [e for ch in _STRIP
                                  if (e := self._index.entry_by_char(ch))]
 
         self.search_edit.textChanged.connect(self._on_query)
-        # Enter 不再走 returnPressed:eventFilter/keyPressEvent 内直接处理,
-        # 需要读 ev.modifiers() 判 Shift(keep-open,U4)
+        # Enter 不走 returnPressed:keyPressEvent/eventFilter 内需读 Shift 修饰
         self.cat_list.currentRowChanged.connect(self._on_category_changed)
         self.grid.currentItemChanged.connect(self._on_grid_current)
         self.cat_list.setCurrentRow(0)  # 触发首次 _load_category("")
 
-    # ── 生命周期(§6.2 定位 + FR1.4 关闭)─────────────────────────
+    # ── 生命周期 ────────────────────────────────────────────────
 
     def popup(self, target_hwnd: int, from_hotkey: bool = True) -> None:
-        """呼出:光标屏幕定位 + 边缘收拢,记录注入目标窗口。
-
-        默认焦点 = 面板自身(导航模式):←→ 横移 / ↑↓ 纵移,打字自动进框。
-        热键路径需武装末键残留过滤(BUG②):托盘等无按键上下文不武装。
-        """
+        """呼出:光标屏幕定位 + 边缘收拢,记录注入目标窗口。"""
         self._target_hwnd = target_hwnd
         self._popup_ts = time.monotonic()
         pt = QCursor.pos()
@@ -341,26 +317,23 @@ class EmojiPanel(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
-        # 前台锁兜底(坑 #2):呼出时本进程是后台进程,Qt activateWindow 的
-        # SetForegroundWindow 会被系统拦下(面板可见却拿不到 OS 焦点,
-        # 按键仍进原前台窗口),须以 Alt 轻敲技巧对自身原生窗口强抢焦点
+        # 前台锁兜底:呼出时本进程是后台进程,activateWindow 可能被系统拦下,
+        # 须以 Alt 轻敲技巧对自身原生窗口强抢焦点
         sender.restore_focus(int(self.winId()))
         if from_hotkey:
             self._arm_tail_filter()
         self.search_edit.clear()
         self.setFocus()  # 导航模式(焦点在面板,非搜索框)
         if not self.search_edit.text():
-            # 原本就为空时 clear() 不触发 textChanged,手动刷新常用栏(频率可能已变)
+            # 原本就为空时 clear() 不触发 textChanged,手动刷新常用栏
             self._load_category(self._current_group())
 
     def dismiss(self) -> None:
-        """立即隐藏,无动画(FR1.4)。"""
+        """立即隐藏,无动画。"""
         self.hide()
 
     def paintEvent(self, _ev) -> None:
-        """根背景自绘(坑 #13):半透明圆角 + 1px 描边,emoji 由 delegate
-        前景绘制不受影响。颜色/透明度按主题(_PANEL_BG/_PANEL_BORDER),
-        「些许透明」= 根 alpha 235/242,子控件 QSS 背景在其上分层。"""
+        """根背景自绘:半透明圆角 + 1px 描边(见 _PANEL_BG 说明)。"""
         theme = self._cfg["panel"].get("theme")
         bg = QColor(*_PANEL_BG.get(theme, _PANEL_BG["dark"]))
         border = QColor(*_PANEL_BORDER.get(theme, _PANEL_BORDER["dark"]))
@@ -374,17 +347,17 @@ class EmojiPanel(QWidget):
         painter.drawPath(path)
 
     def event(self, e: QEvent) -> bool:
-        # 跨进程点击不产生本进程鼠标事件,点外关闭唯一可靠信号是失活(§ 决议 7)。
-        # 300ms 宽限:suppress=False 下热键直通前台应用(如 VS Code 的 Alt+E 菜单),
-        # 原生菜单会在呼出瞬间抢走激活,不该据此立即关面板(坑 #11 副作用)
+        # 点外关闭唯一可靠信号是失活(跨进程点击不产生本进程鼠标事件)。
+        # 300ms 宽限:热键直通前台应用时(如 VS Code 的 Alt+E 菜单),原生
+        # 菜单会在呼出瞬间抢走激活,不该据此立即关面板
         if (e.type() == QEvent.Type.ActivationChange and self.isVisible()
                 and QApplication.activeWindow() is None
                 and time.monotonic() - self._popup_ts > 0.3
-                and time.monotonic() > self._hold_grace):  # keep-open 豁免(U4)
+                and time.monotonic() > self._hold_grace):
             self.dismiss()
         return super().event(e)
 
-    # ── 分类浏览与结果填充(搜索 / 分类双模式)────────────────────
+    # ── 分类浏览与结果填充 ───────────────────────────────────────
 
     def _current_group(self) -> str:
         item = self.cat_list.currentItem()
@@ -401,7 +374,7 @@ class EmojiPanel(QWidget):
         self._fill(entries)
 
     def _recent_entries(self) -> list[dict]:
-        """常用栏:频率 top(recent_count)在前,固定常用条补足冷启动。"""
+        """常用栏:频率 top 在前,固定常用条补足冷启动。"""
         p = self._cfg["panel"]
         recents = (self._index.top_frequent(int(p.get("recent_count", 24)))
                    if p.get("show_recent", True) else [])
@@ -410,12 +383,10 @@ class EmojiPanel(QWidget):
 
     def _on_query(self, text: str) -> None:
         if text.strip():
-            # 搜索模式:结果网格 + 分类栏淡化(§5)
-            self.cat_list.setEnabled(False)
+            self.cat_list.setEnabled(False)  # 搜索模式:分类栏淡化
             self._fill(self._index.query(text))
         else:
-            # 清空 → 回分类浏览
-            self.cat_list.setEnabled(True)
+            self.cat_list.setEnabled(True)  # 清空 → 回分类浏览
             self._load_category(self._current_group())
 
     def _fill(self, entries: list[dict]) -> None:
@@ -446,14 +417,14 @@ class EmojiPanel(QWidget):
             text = (f"{entry.get('name_zh', '')} · {entry.get('name', '')}"
                     f" · U+{entry['cp']}")
             words = self._aliases.get(entry["char"])
-            if words:  # §5:信息栏显示已配置别名(M3)
+            if words:
                 text += f" · 别名: {', '.join(words)}"
             self.info_label.setText(text)
         else:
             self.preview.clear()
             self.info_label.clear()
 
-    # ── 右键别名管理(FR3.5:添加 / 编辑 / 移除,保存即生效)────────
+    # ── 右键别名管理 ────────────────────────────────────────────
 
     def _on_context_menu(self, pos: QPoint) -> None:
         item = self.grid.itemAt(pos)
@@ -480,7 +451,7 @@ class EmojiPanel(QWidget):
             QApplication.clipboard().setText(char)
 
     def _ask_aliases(self, char: str, existing: list[str]) -> list[str] | None:
-        """别名输入框(预填现状,逗号分隔,兼作查看);取消 None,空输入 []。"""
+        """别名输入框(预填现状,逗号分隔);取消返回 None,空输入返回 []。"""
         text, ok = QInputDialog.getText(
             self, "搜索别名",
             f"设置 {char} 的别名(多个用逗号分隔,清空 = 移除):",
@@ -507,10 +478,10 @@ class EmojiPanel(QWidget):
         if cur:
             self._on_grid_current(cur, None)
 
-    # ── 上屏(坑 #9 时序:先 hide → 再还原焦点 → 再注入)──────────
+    # ── 上屏(时序:先 hide → 再还原焦点 → 再注入)──────────────
 
     def _keep_open_for(self, shift: bool) -> bool:
-        """keep-open 判定:配置恒开,或 Shift+提交且开关允许(U4)。"""
+        """keep-open 判定:配置恒开,或 Shift+提交且开关允许。"""
         p = self._cfg["panel"]
         if not p.get("close_after_submit", True):
             return True
@@ -531,8 +502,8 @@ class EmojiPanel(QWidget):
     def _submit(self, entry: dict, keep_open: bool = False) -> None:
         char = entry["char"]
         if keep_open:
-            # 先置失活豁免再让焦点去目标应用(type_text 内 restore_focus),
-            # 否则 event() 会把「面板失活」误判为点外关闭,注入中途关面板
+            # 先置失活豁免再让焦点去目标应用,否则 event() 会把「面板失活」
+            # 误判为点外关闭,注入中途关面板
             self._hold_grace = time.monotonic() + 0.6
         else:
             self.dismiss()
@@ -540,14 +511,14 @@ class EmojiPanel(QWidget):
         if not ok and self._cfg["advanced"].get("fallback_to_clipboard", True):
             ok = sender.clipboard_fallback(char)
             if ok:
-                self.fallback_notice.emit(char)  # FR6.4:降级提示(托盘侧节流)
+                self.fallback_notice.emit(char)
         if ok:
             config.bump_frequency(char)
         if keep_open and self.isVisible():
             self._reactivate_after_submit()
 
     def _reactivate_after_submit(self) -> None:
-        """keep-open:抢回前台与焦点,选中项下移一行(连续上屏,U4)。"""
+        """keep-open:抢回前台与焦点,选中项下移一行(连续上屏)。"""
         self._hold_grace = time.monotonic() + 0.6
         sender.restore_focus(int(self.winId()))
         if self.search_edit.text():
@@ -560,11 +531,7 @@ class EmojiPanel(QWidget):
             self._select_row(min(max(self.grid.currentRow(), 0) + 1, count - 1))
 
     def _apply_grid_metrics(self) -> None:
-        """网格字体/格宽/delegate 随 icon_size 与主题重建(构造与热应用共用)。
-
-        格宽 = icon_size + 10(与 M4 apply_cfg 一致,修构造期硬编码 46);
-        delegate 持字体与主题色引用,变更即重建。
-        """
+        """网格字体/格宽/delegate 随 icon_size 与主题重建。"""
         p = self._cfg["panel"]
         font = QFont("Segoe UI Emoji")
         font.setPixelSize(int(p["icon_size"]))
@@ -576,24 +543,24 @@ class EmojiPanel(QWidget):
                                                  self.grid))
 
     def apply_cfg(self) -> None:
-        """设置变更热应用(M4/FR5.2):尺寸、图标大小、主题。"""
+        """设置变更热应用:尺寸、图标大小、主题。"""
         p = self._cfg["panel"]
         self.setFixedSize(QSize(int(p["width"]), int(p.get("height", 440))))
         self._apply_grid_metrics()
         self.setStyleSheet(LIGHT_QSS if p.get("theme") == "light" else DARK_QSS)
 
-    # ── 键盘交互(M5 输入模型:导航模式 keyPressEvent + 输入模式 eventFilter)──
+    # ── 键盘交互 ────────────────────────────────────────────────
 
     @property
     def _columns(self) -> int:
-        """实际可见列数(按视口/格宽算;纵向导航/PgUp/PgDn 步长)。"""
+        """实际可见列数(按视口/格宽算;纵向导航步长)。"""
         gw = self.grid.gridSize().width() or 46
         return max(1, self.grid.viewport().width() // gw)
 
     def _arm_tail_filter(self) -> None:
-        """记录热键末键(BUG②):呼出瞬间它常仍被按住,OS 自动重复的
-        KeyPress 会落进刚拿到焦点的面板/搜索框变成搜索文本。丢弃其
-        KeyPress 直到观察到 KeyRelease 或超时(1s 兜底)。"""
+        """记录热键末键:呼出瞬间它常仍被按住,OS 自动重复的 KeyPress
+        会落进刚拿到焦点的面板变成搜索文本;丢弃其 KeyPress 直到
+        观察到 KeyRelease 或超时(1s 兜底)。"""
         try:
             seq = keyboard_to_qt(self._cfg["hotkey"])
             tail = seq.split("+")[-1].strip() if seq else ""
@@ -621,7 +588,7 @@ class EmojiPanel(QWidget):
         return False
 
     def _switch_category(self, delta: int) -> None:
-        """+/- 切分类:先清搜索文本(消互斥困惑)再切换(M5 §5)。"""
+        """+/- 切分类:先清搜索文本再切换。"""
         if self.search_edit.text():
             self.search_edit.clear()  # 触发 _on_query("") → 回浏览模式重载当前类
         count = self.cat_list.count()
@@ -692,7 +659,7 @@ class EmojiPanel(QWidget):
             self._move_selection(delta)
             return
         if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete) and self.search_edit.text():
-            # 框内有文本时退格仍作用于文本(进框转发的需要,非可打印字符)
+            # 框内有文本时退格仍作用于文本
             self.search_edit.setFocus()
             QApplication.sendEvent(self.search_edit, ev)
             return
@@ -705,24 +672,24 @@ class EmojiPanel(QWidget):
         super().keyPressEvent(ev)
 
     def keyReleaseEvent(self, ev: QEvent) -> None:
-        # 只为观察热键末键的 KeyRelease 以解除残留过滤(BUG②)
+        # 只为观察热键末键的 KeyRelease 以解除残留过滤
         self._residual_key(ev)
         super().keyReleaseEvent(ev)
 
     def eventFilter(self, obj: QObject, ev: QEvent) -> bool:
         if ev.type() not in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             return super().eventFilter(obj, ev)
-        if self._residual_key(ev):  # BUG②:末键残留(Press 吞 / Release 解除)
+        if self._residual_key(ev):  # 末键残留(Press 吞 / Release 解除)
             return True
         if ev.type() == QEvent.Type.KeyRelease:
             return super().eventFilter(obj, ev)
         key = ev.key()
 
         if obj is self.search_edit:
-            if key == Qt.Key.Key_Escape:  # Esc 即走(FR1.4)
+            if key == Qt.Key.Key_Escape:  # Esc 即走
                 self.dismiss()
                 return True
-            if key == Qt.Key.Key_Tab:  # Tab:框↔面板互换(M5,原「去分类栏」改回面板)
+            if key == Qt.Key.Key_Tab:  # Tab:框↔面板互换
                 self.setFocus()
                 return True
             if key in (Qt.Key.Key_Equal, Qt.Key.Key_Plus):
@@ -731,7 +698,7 @@ class EmojiPanel(QWidget):
             if key == Qt.Key.Key_Minus:
                 self._switch_category(-1)
                 return True
-            # 搜索模式下数字 1-9 直选前 9 项(§5;浏览模式下数字照常入框搜索)
+            # 搜索模式下数字 1-9 直选前 9 项(浏览模式下数字照常入框搜索)
             if (self.search_edit.text() and Qt.Key.Key_1 <= key <= Qt.Key.Key_9):
                 item = self.grid.item(key - Qt.Key.Key_1)
                 if item:

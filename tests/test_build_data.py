@@ -1,8 +1,4 @@
-"""索引完整性测试(DESIGN.md §10 M0)。
-
-覆盖:条目数 ≥3700、必填字段齐全、码点无重复、
-💩 条目含 zh/en/py/abbr 四类关键词、拼音推导正确性。
-"""
+"""索引完整性测试:条目数、必填字段、码点唯一性、拼音推导。"""
 
 import json
 from pathlib import Path
@@ -28,7 +24,7 @@ def index() -> dict:
 
 
 def test_pinyin_derivation():
-    """拼音推导直接对齐 DESIGN.md §4.2 示例:便便→bianbian/bb,屎→shi/s。"""
+    """拼音推导:便便→bianbian/bb,屎→shi/s。"""
     pys, abbrs = pinyin_words(["便便", "屎"])
     assert "bianbian" in pys and "bb" in abbrs
     assert "shi" in pys and "s" in abbrs
@@ -59,7 +55,7 @@ def test_no_duplicate_cp(index):
 
 
 def test_poop_four_keyword_types(index):
-    """💩 必须同时具备 zh/en/py/abbr 四类词(M0 验收)。"""
+    """💩 必须同时具备 zh/en/py/abbr 四类词。"""
     poop = next(e for e in index["emojis"] if e["cp"] == "1F4A9")
     assert poop["kw_en"], "kw_en 为空"
     assert poop["kw_zh"], "kw_zh 为空"

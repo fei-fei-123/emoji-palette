@@ -1,10 +1,7 @@
-"""QApplication 装配、单实例锁、托盘(DESIGN.md §3/§9,FR5.1)。
+"""应用装配:单实例锁 → 配置 → 索引 → 面板 → 热键 → 扩展 → 托盘。
 
-M4 装配链:单实例 → 配置 → 索引(+别名)→ 面板 → 热键桥 → 文本扩展
-→ 托盘 + 设置窗 + 钩子看护。退出 = 托盘「退出」或终端 Ctrl+C。
-单实例:命名互斥体 —— DESIGN §9 原定 QLocalServer.listen 失败检测,
-但 PySide6 6.11 Windows 下 listen 不再互斥(同进程双 listen 实测均成功),
-改为 Local 命名空间互斥体,进程退出系统自动回收。
+退出 = 托盘「退出」或终端 Ctrl+C。单实例 = Local 命名空间互斥体
+(进程退出系统自动回收)。
 """
 
 import ctypes
@@ -29,7 +26,7 @@ from emoji_palette.search import SearchIndex
 from emoji_palette.settings_ui import SettingsDialog
 
 APP_NAME = "EmojiPalette"
-# PyInstaller onefile 解包目录 _MEIPASS;开发态 = 仓库根(§9 目录结构)
+# PyInstaller onefile 解包目录 _MEIPASS;开发态 = 仓库根
 _BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
 INDEX_PATH = _BASE / "data" / "index.json"
 
@@ -40,12 +37,11 @@ _kernel32.CreateMutexW.restype = wt.HANDLE
 
 
 def _unsupported_filter():
-    """按本机 Segoe UI Emoji 实际字形覆盖过滤(坑 #12)。
+    """按本机 Segoe UI Emoji 实际字形覆盖过滤(无此码点 = 渲染豆腐块)。
 
-    QRawFont.glyphIndexesForString 返回 [0](.notdef)即该字体无此码点 →
-    必然渲染豆腐块。比按 ver 字段猜版本精确(逐机实测);
-    offscreen 平台下 QRawFont 会崩,非 windows 平台不过滤。
-    返回 None 表示无法检测(字体缺失等),宁可显示豆腐也不误删。
+    QRawFont.glyphIndexesForString 返回 [0](.notdef)即该字体无此码点。
+    offscreen 平台下 QRawFont 会崩,非 Windows 平台不过滤;
+    返回 None 表示无法检测,宁可显示豆腐也不误删。
     """
 
     if QGuiApplication.platformName() != "windows":
@@ -102,7 +98,7 @@ def main() -> int:
 
     cfg = config.load_config()
     if cfg["autostart"] != config.is_autostart():
-        config.set_autostart(cfg["autostart"])  # json 意图 → 注册表(§8 默认 true)
+        config.set_autostart(cfg["autostart"])  # json 意图 → 注册表
 
     if not INDEX_PATH.exists():
         QMessageBox.critical(
@@ -135,16 +131,12 @@ def main() -> int:
     bridge.activated.connect(toggle)
     manager.start(cfg["hotkey"])
 
-    # ── 文本扩展(M5/§6.6)::: 前缀录制 → 候选条;匹配在主线程 ──
+    # ── 文本扩展::: 前缀录制 → 候选条;匹配在主线程 ──────────────
     expansion = cfg["expansion"]
     blacklist = set(expansion["process_blacklist"])
 
     def gate() -> bool:
-        """扩展活跃门禁:总开关 ∧ 面板不可见 ∧ 非黑名单进程 ∧ IME 关闭。
-
-        面板可见时按键属于面板搜索框,必须让路(扩展全局 suppress 钩子
-        会吞掉面板内的空格);IME 开启时按键归输入法(FR4.3 硬性要求)。
-        """
+        """扩展活跃门禁:总开关 ∧ 面板不可见 ∧ 非黑名单进程 ∧ IME 不转写。"""
         if not expansion["enabled"] or panel.isVisible():
             return False
         if ime.foreground_process_name() in blacklist:
@@ -170,7 +162,7 @@ def main() -> int:
         if not ok and cfg["advanced"].get("fallback_to_clipboard", True):
             ok = sender.clipboard_fallback(entry["char"])
             if ok:
-                on_fallback(entry["char"])  # 托盘气泡(修 M3 起扩展路径无降级的不对称)
+                on_fallback(entry["char"])  # 托盘气泡
         if ok:
             config.bump_frequency(entry["char"])
 
@@ -221,7 +213,7 @@ def main() -> int:
             expand_hook.stop()
         panel.apply_cfg()
 
-    # ── 托盘(FR5.1)──────────────────────────────────────────────
+    # ── 托盘 ────────────────────────────────────────────────────
     tray = QSystemTrayIcon(_make_tray_icon(), app)
     tray.setToolTip("Emoji Palette(热键呼出 / :: 扩展)")
     menu = QMenu()
@@ -275,7 +267,7 @@ def main() -> int:
     act_settings.triggered.connect(open_settings)
     act_quit.triggered.connect(app.quit)
 
-    # FR6.4:剪贴板降级托盘气泡,每会话至多一次(不反复打扰)
+    # 剪贴板降级托盘气泡,每会话至多一次/小时(不反复打扰)
     bubble_state = {"last": 0.0}
 
     def on_fallback(char: str) -> None:
@@ -287,7 +279,7 @@ def main() -> int:
 
     panel.fallback_notice.connect(on_fallback)
 
-    # ── 钩子看护(§6.7,偏差见 hotkey.py docstring)───────────────
+    # ── 钩子看护 ────────────────────────────────────────────────
     def rehook_all() -> None:
         reapply_runtime()
 
@@ -303,7 +295,7 @@ def main() -> int:
     keepalive.timeout.connect(lambda: None)
     keepalive.start()
 
-    gc.freeze()  # §6.7:启动完成,冻结当前对象集,减少全代回收停顿
+    gc.freeze()  # 冻结当前对象集,减少全代回收停顿(保护钩子时限)
 
     def cleanup() -> None:
         watchdog.stop()

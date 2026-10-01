@@ -1,38 +1,20 @@
-"""``::`` 前缀录制 → 候选条交互状态机(DESIGN.md §6.6,M5 重设计)。
+"""``::`` 前缀录制 → 候选条交互状态机。
 
 分层:
-- ``Expander``      纯状态机(on_key → (吞键?, 事件?)),表驱动单测的直接靶;
-- ``ExpandBridge``  钩子线程 → Qt 主线程信号桥(§3 线程约定,同 HotkeyBridge);
-- ``ExpanderHook``  keyboard 库 suppress 钩子适配:门禁节流 + 状态机 + 事件排队。
+- ``Expander``      纯状态机(on_key → (吞键?, 事件?)),表驱动单测的靶;
+- ``ExpandBridge``  钩子线程 → Qt 主线程信号桥;
+- ``ExpanderHook``  keyboard 库 suppress 钩子适配:状态机 + 事件排队。
 
-M5 起字符解析/匹配全部移到主线程(``search.prefix_candidates``),
-钩子线程只做 O(1) 状态转移;主线程每次刷新候选条后把「有无候选」
-写回 ``set_has_candidates``(GIL 下 bool 读写原子,空格/数字吞键的
-决策依据)。
+字符解析/匹配在主线程完成,钩子线程只做 O(1) 状态转移;主线程每次
+刷新候选后回写「有无候选」(set_has_candidates),作为吞键依据。
 
-REC 态抑制矩阵(§6.6;异常路径一律 (False, None) 放行 —— 键盘安全硬约束):
-
-  按键        有候选  suppress  动作
-  ─────────────────────────────────────────────────────
-  字母 a-z    —       放行      入缓冲,发 update
-  数字 1-9    有      吞        发 digit n(back=前缀+缓冲),复位
-  数字        无      放行      入缓冲(如 ``100`` 类词),发 update
-  空格/enter  有      吞        发 commit(back=前缀+缓冲),复位
-  空格/enter  无      放行      复位,发 close(未命中原样放行)
-  Esc         —       吞        复位,发 close
-  ↑ / ↓       —       吞        复位,发 close(用户指定上下关条)
-  ← / →       有      吞        发 left/right(条内移动,不达目标应用)
-                          (无候选走「其他」分支放行关条,方向键会破坏
-                           回删镜像,REC 态有候选时必须挡下)
-  Backspace   —       放行      缓冲非空→pop+update;已空→复位+close
-  修饰键       —      放行      不打断状态(``:`` 需按住 Shift,自动重复/
-                          松开重按的修饰流不得复位 —— M5 BUG① 真因)
-  其他非单字符 —      放行      复位,发 close(功能键/tab/caps lock 等)
-  缓冲 ≥24    —       放行      复位,发 close
-  门禁复查失败 —      放行      复位,发 close
-
-注入不进钩子线程:SendInput 在低级钩子回调内重入有超时/死锁风险
-(LowLevelHooksTimeout,§6.7),事件经信号排队到主线程执行。
+REC 态按键规则:字母/无候选数字放行入缓冲;空格/Enter/数字 1-9 在
+有候选时吞下并提交,无候选放行复位;Esc/↑↓ 吞下并关条;←/→ 有候选
+时劫持为条内移动(透传会破坏回删数假设);修饰键放行且不打断状态
+(前缀 ``:`` 需按住 Shift,修饰流不得复位状态机);其余键放行复位。
+异常路径一律放行 —— 键盘安全硬约束。
+注入不进钩子线程:SendInput 在低级钩子回调内重入有超时/死锁风险,
+事件经信号排队到主线程执行。
 """
 
 import time
@@ -44,13 +26,10 @@ from PySide6.QtCore import QObject, Signal
 Gate = Callable[[], bool]
 
 IDLE, ARMED, REC = 0, 1, 2
-_MAX_BUF = 24  # §6.6:缓冲超长复位
+_MAX_BUF = 24
 _DIGITS = "123456789"  # 0 无对应格,照常入缓冲(如 ``100`` 类词)
 
-# 修饰键名(keyboard 库报法):放行且不打断状态 —— 前缀 ``:`` 本身需要
-# 按住 Shift 输入,两个前缀键之间的 shift 事件(松开重按 / 按住自动
-# 重复)会把 ARMED 打回 IDLE,真机 ``::`` 永远无法武装(M5 BUG① 真因,
-# E2E 程序化驱动一气呵成按住 Shift 测不出)
+# 修饰键名(keyboard 库报法):放行且不打断状态
 _MODIFIER_KEYS = frozenset({
     "shift", "ctrl", "alt", "alt gr", "windows",
     "left shift", "right shift", "left ctrl", "right ctrl",
@@ -59,12 +38,7 @@ _MODIFIER_KEYS = frozenset({
 
 
 class Expander:
-    """``::`` 录制状态机(§6.6 图):IDLE →(前缀首键)→ ARMED →(前缀余键)→ REC。
-
-    REC 中字母/数字入缓冲(真实文本留在目标窗口)、候选条叠加显示;
-    空格/Enter/数字 提交选中项(吞键 + 回删前缀与缓冲再注入);
-    ←/→ 被劫持为条内移动。所有前缀键与缓冲键放行。
-    """
+    """``::`` 录制状态机:IDLE →(前缀首键)→ ARMED →(前缀余键)→ REC。"""
 
     def __init__(self, gate: Gate, prefix: str = "::") -> None:
         self._gate = gate
@@ -101,10 +75,7 @@ class Expander:
         return True
 
     def on_key(self, name: str, now: float | None = None) -> tuple[bool, dict | None]:
-        """处理一个按键;返回 (suppress, event)。
-
-        event 为 compose 事件 dict 或 None,None = 无事发生(全部放行)。
-        """
+        """处理一个按键;返回 (suppress, event)。event 为 compose 事件或 None。"""
         now = now if now is not None else time.monotonic()
         try:
             return self._step(name, now)
@@ -129,7 +100,7 @@ class Expander:
 
         if self._state == ARMED:
             if name in _MODIFIER_KEYS:
-                return (False, None)  # 修饰流不打断(BUG①:两个 `:` 之间的 shift)
+                return (False, None)  # 修饰流不打断(两个 `:` 之间的 shift)
             want = self._prefix[self._matched] if self._matched < len(self._prefix) else None
             if want is not None and name == want:
                 self._matched += 1
@@ -158,11 +129,11 @@ class Expander:
         if name == "esc":
             self.reset()
             return (True, self._ev("close"))
-        if name in ("up", "down"):  # 用户指定 ↑↓ 关条(退出候选,回正常输入)
+        if name in ("up", "down"):  # ↑↓ 关条(退出候选,回正常输入)
             self.reset()
             return (True, self._ev("close"))
         if name in ("left", "right") and self._has_cand:
-            # 劫持为条内移动;无候选时落入「其他」分支放行关条(用户可离开)。
+            # 劫持为条内移动;无候选时落入「其他」分支放行关条。
             # 方向键会破坏「回删数 = 缓冲长」的镜像假设(光标移进文本中部),
             # 故 REC 态有候选时必须挡下,不能透传。
             return (True, self._ev(name))
@@ -178,7 +149,7 @@ class Expander:
             self.reset()
             return (True, ev)
         if not (name.isalnum() and name.isascii() and len(name) == 1):
-            self.reset()  # 修饰键名(ctrl 等)/其他键:放行并复位收条
+            self.reset()  # 其他键:放行并复位收条
             return (False, self._ev("close"))
         if len(self._buf) >= _MAX_BUF:
             self.reset()
@@ -188,17 +159,13 @@ class Expander:
 
 
 class ExpandBridge(QObject):
-    """钩子线程 → 主线程:候选条 compose 事件(queued,同 §3 线程约定)。"""
+    """钩子线程 → 主线程:候选条 compose 事件(queued)。"""
 
     compose = Signal(dict)  # {"event": show/update/close/left/right/digit/commit, ...}
 
 
 class ExpanderHook:
-    """keyboard 库 suppress 钩子包装:事件 → 状态机;compose → 信号。
-
-    回调只做 O(1) 决策(状态转移),异常全吞默认放行。
-    返回值语义:True=放行 / False=拦截(_winkeyboard 约定,勿再弄反 —— M3 E2E 实测踩坑)。
-    """
+    """keyboard 库 suppress 钩子包装:事件 → 状态机;compose → 信号。"""
 
     def __init__(self, machine: Expander, bridge: ExpandBridge) -> None:
         self._machine = machine
@@ -223,8 +190,8 @@ class ExpanderHook:
     def _on_event(self, event) -> bool:
         """低级钩子回调(keyboard 库线程)。
 
-        返回值遵循 _winkeyboard.prepare_intercept 约定(与直觉相反):
-        True = 放行给下一个程序,False = 拦截。即「不吞」返回 True。
+        返回值遵循 _winkeyboard 约定(与直觉相反):
+        True = 放行给下一个程序,False = 拦截。
         """
         try:
             if getattr(event, "event_type", None) != "down":

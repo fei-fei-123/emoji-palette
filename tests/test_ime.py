@@ -1,7 +1,7 @@
-"""IME 门禁判定测试(ime_transcribing 子模式双判,M5 案件 2 回归)。
+"""IME 门禁判定测试(ime_transcribing 子模式双判)。
 
-真机探测数据(2026-10-01,MS 拼音):中文子模式 IMC_GETCONVERSIONMODE
-= 1025(原生|符号),英文子模式 = 0,英文键盘 IMC_GETOPENSTATUS = 0。
+真机探测基准(MS 拼音):中文子模式 IMC_GETCONVERSIONMODE=1025,
+英文子模式 = 0,英文键盘 IMC_GETOPENSTATUS = 0。
 门禁据此三态:英文键盘/英文子模式 → 放行;中文原生/全角 → 拦截。
 """
 
@@ -59,7 +59,7 @@ def test_chinese_submode_blocks(monkeypatch):
 
 
 def test_english_submode_passes(monkeypatch):
-    """中文输入法的英文半角子模式(mode=0)→ 放行(FR4.3 本意,M5 修复点)。"""
+    """中文输入法的英文半角子模式(mode=0)→ 放行。"""
     _patch(monkeypatch, status=1, mode=0)
     assert ime.ime_transcribing() is False
 

@@ -1,9 +1,4 @@
-"""全局热键注册/改绑 + 钩子保活 Watchdog(DESIGN.md §6.1/§6.7)。
-
-Watchdog(M4)偏差实现:不发测试键(§6.7 原案的全局注入在本机不可靠,
-且会向用户前台应用打进按键),改为 30s 校验 keyboard 监听线程存活,
-失活即强制重启监听 + 业务层重挂钩子(决议见 DEVLOG)。
-"""
+"""全局热键注册/改绑 + 键盘钩子看护。"""
 
 import sys
 
@@ -14,13 +9,13 @@ from emoji_palette import sender
 
 
 class HotkeyBridge(QObject):
-    """钩子线程 → 主线程的信号桥(AutoConnection 跨线程自动 queued,§3)。"""
+    """钩子线程 → 主线程的信号桥(跨线程自动 queued)。"""
 
     activated = Signal(int)  # 呼出瞬间的前台窗口 hwnd
 
 
 class HotkeyManager:
-    """add_hotkey 包装:改绑 = 先移除再注册(keyboard 库不支持原地改)。"""
+    """全局热键注册;改绑 = 先移除再注册(keyboard 库不支持原地改)。"""
 
     def __init__(self, bridge: HotkeyBridge) -> None:
         self._bridge = bridge
@@ -44,21 +39,17 @@ class HotkeyManager:
         self._hotkey = None
 
     def _on_hotkey(self) -> None:
-        """钩子线程回调:只做 O(1) 工作,异常全吞(键盘安全 > 功能完整,§12)。"""
+        """钩子线程回调:只做 O(1) 工作,异常全吞(键盘安全优先)。"""
         try:
             hwnd = sender.get_foreground_window()
             self._bridge.activated.emit(hwnd)
-        except Exception:  # noqa: BLE001, S110 — 钩子回调严禁抛出,静默即键盘安全
+        except Exception:  # noqa: BLE001, S110 — 钩子回调严禁抛出
             pass
 
 
 class HookWatchdog(QObject):
-    """钩子活性看护(§6.7,M4):30s 校验 keyboard 监听线程存活。
-
-    失活(低级钩子被系统摘除后线程退出/GC 停顿致死)→ 置 listening=False
-    让 start_if_necessary 可重启,再回调 rehook 由业务层重挂全部钩子;
-    rehooked 信号供托盘气泡(app 侧节流 ≤1 次/小时,§6.7)。
-    """
+    """每 30s 校验 keyboard 监听线程存活;失活(低级钩子被系统摘除)
+    则回调重挂全部钩子并发 rehooked 信号(托盘气泡用)。"""
 
     rehooked = Signal()
 

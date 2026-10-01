@@ -1,9 +1,7 @@
-"""M5 输入模型回归:导航模式 keyPressEvent / 输入模式 eventFilter。
+"""输入模型回归:导航模式 keyPressEvent / 输入模式 eventFilter。
 
-沿 M2 决议:offscreen 下不断言真实 OS 焦点,断言行为效果
-(搜索框文本 / 选中行 / 分类行 / 注入捕获);真焦点交真机冒烟。
-Win32 副作用(restore_focus 的 Alt 轻敲 / type_text 注入 / 频率落盘)
-全部 monkeypatch,测试不骚扰用户桌面。
+offscreen 下不断言真实 OS 焦点,断言行为效果(搜索框文本 / 选中行 /
+分类行 / 注入捕获);Win32 副作用全部 monkeypatch,测试不骚扰桌面。
 """
 
 import copy
@@ -60,7 +58,7 @@ def _release(widget, key: Qt.Key, text: str = "") -> None:
                           Qt.KeyboardModifier.NoModifier, text))
 
 
-# ── U3:导航模式(焦点在面板)──────────────────────────────────
+# ── 导航模式(焦点在面板)─────────────────────────────────
 
 
 def test_typing_from_panel_enters_search_box(monkeypatch):
@@ -115,7 +113,7 @@ def test_esc_dismiss_from_panel(monkeypatch):
     assert not p.isVisible()
 
 
-# ── U3:输入模式(搜索框 eventFilter)─────────────────────────
+# ── 输入模式(搜索框 eventFilter)─────────────────────────
 
 
 def test_search_up_down_returns_to_panel_and_moves_vertically(monkeypatch):
@@ -170,7 +168,7 @@ def test_search_tab_returns_focus_to_panel(monkeypatch):
     assert p.grid.currentRow() == 1
 
 
-# ── U2:BUG② 热键末键残留过滤 ─────────────────────────────────
+# ── 热键末键残留过滤 ───────────────────────────────────────
 
 
 def test_residual_trigger_key_swallowed(monkeypatch):
@@ -206,7 +204,7 @@ def test_tray_popup_does_not_arm_filter(monkeypatch):
     assert p.search_edit.text() == "e"  # 无过滤,直接入框
 
 
-# ── U4:keep-open ─────────────────────────────────────────────
+# ── keep-open ─────────────────────────────────────────────────
 
 
 def test_submit_default_closes(monkeypatch):
@@ -243,7 +241,7 @@ def test_hold_grace_blocks_deactivation_close(monkeypatch):
     p = _make_panel(monkeypatch, close_after_submit=False)
     p.popup(0, from_hotkey=False)
     # offscreen 下 activeWindow 恒为面板自身,失活场景须伪造静态方法;
-    # _popup_ts 置旧以越过呼出 300ms 宽限(坑 #11)
+    # _popup_ts 置旧以越过呼出 300ms 宽限
     monkeypatch.setattr(panel_mod, "QApplication", _NoActiveApp)
     p._popup_ts = 0.0
     # grace 未到:失活事件被豁免

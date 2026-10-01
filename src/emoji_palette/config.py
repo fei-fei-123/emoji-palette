@@ -1,10 +1,4 @@
-"""配置 / 别名 / 频率读写,自启动注册表(DESIGN.md §4.3/§6.8/§8)。
-
-目录:%APPDATA%\\EmojiPalette\\。config.json / frequency.json / aliases.json
-全部「变更即写」(FR5.4;与 §4.3 的批量落盘矛盾,决议见 DEVLOG)。
-自启动:HKCU Run 注册表值(§6.8),打包后 = exe 本体,
-开发态 = python -c 引导(sys.path 注入 src,Run 键无法设环境变量)。
-"""
+"""配置 / 别名 / 频率读写 + 自启动注册表(数据目录 %APPDATA%\\EmojiPalette)。"""
 
 import json
 import os
@@ -18,9 +12,6 @@ CONFIG_PATH = DATA_DIR / "config.json"
 FREQ_PATH = DATA_DIR / "frequency.json"
 ALIAS_PATH = DATA_DIR / "aliases.json"
 
-# DESIGN.md §8 完整默认值;任何字段缺失/类型不符时代码内兜底,不抛错
-# M2 偏差:width 480→600/新增 height(§5 布局加分类栏+信息栏后 10 列需 ~600);
-# 新增 advanced.hide_unsupported(坑 #12 豆腐块按 QRawFont 字形检测隐藏)
 DEFAULT_CONFIG: dict[str, Any] = {
     "hotkey": "alt+e",
     "panel": {
@@ -32,9 +23,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "position": "cursor",
         "show_recent": True,
         "recent_count": 24,
-        # M5/§8:上屏后是否自动关面板;Shift+Enter 强制保持(双开关可配)
-        "close_after_submit": True,
-        "shift_enter_keeps_open": True,
+        "close_after_submit": True,   # 上屏后自动关面板
+        "shift_enter_keeps_open": True,  # Shift+Enter 强制保持
     },
     "expansion": {
         "enabled": True,
@@ -56,7 +46,7 @@ _frequencies: dict[str, int] = {}
 
 
 def _atomic_write(path: Path, text: str) -> None:
-    """临时文件 + os.replace 原子写;失败仅 stderr 警告(不抛错)。"""
+    """临时文件 + os.replace 原子写;失败仅 stderr 警告。"""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
@@ -126,7 +116,7 @@ def _save_frequencies() -> None:
 
 
 def bump_frequency(char: str) -> int:
-    """使用频率 +1 并立即落盘(FR5.4);返回新值。"""
+    """使用频率 +1 并立即落盘;返回新值。"""
     _frequencies[char] = _frequencies.get(char, 0) + 1
     _save_frequencies()
     return _frequencies[char]
@@ -138,10 +128,7 @@ def flush_frequencies() -> None:
 
 
 def load_aliases() -> dict[str, list[str]]:
-    """读 aliases.json(§4.3 list[{char, aliases}] → dict[char, list])。
-
-    缺失/损坏/结构不符 → {}(宁可没有别名也不抛错);条目过滤空串。
-    """
+    """读 aliases.json(list[{char, aliases}] → dict);缺失/损坏 → {}。"""
     try:
         raw = json.loads(ALIAS_PATH.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -159,23 +146,20 @@ def load_aliases() -> dict[str, list[str]]:
 
 
 def save_aliases(aliases: dict[str, list[str]]) -> None:
-    """别名全量落盘(改动即写,量小无需增量);空列表条目剔除。"""
+    """别名全量落盘;空列表条目剔除。"""
     data = [{"char": c, "aliases": w} for c, w in aliases.items() if w]
     _atomic_write(ALIAS_PATH, json.dumps(data, ensure_ascii=False, indent=2))
 
 
-# ── 开机自启(HKCU Run,§6.8/FR5.3)─────────────────────────────
+# ── 开机自启(HKCU Run 注册表值)───────────────────────────────
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 AUTOSTART_NAME = "EmojiPalette"
 
 
 def autostart_command() -> str:
-    """自启动命令行:打包态 = exe 本体;开发态 = python -c 引导带 src 路径。
-
-    Run 键只是命令行、无环境变量,`python -m` 找不到包 —— 用 -c 内嵌
-    sys.path.insert。UTF-8 模式(-X utf8)对齐开发运行环境。
-    """
+    """自启动命令行:打包态 = exe 本体;开发态 = python -c 引导带 src 路径
+    (Run 键只是命令行、无环境变量,`python -m` 找不到包)。"""
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}"'
     src = Path(__file__).resolve().parents[1]
@@ -185,7 +169,7 @@ def autostart_command() -> str:
 
 
 def set_autostart(enabled: bool) -> bool:
-    """写/删自启动注册表值;失败仅 stderr 警告并返回 False(不抛错)。"""
+    """写/删自启动注册表值;失败仅 stderr 警告并返回 False。"""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY,
                             0, winreg.KEY_SET_VALUE) as k:

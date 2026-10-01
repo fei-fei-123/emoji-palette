@@ -1,6 +1,6 @@
-"""M4 回归:QKeySequence ↔ keyboard 库热键串换算(FR5.2)。
+"""QKeySequence ↔ keyboard 库热键串换算测试。
 
-裸字符键必须换算失败(否则全局 suppress 会吞掉正常打字);
+裸字符键必须换算失败(否则全局抑制会吞掉正常打字);
 windows 修饰键双向映射;未知/空序列 → ""。
 """
 

@@ -1,16 +1,9 @@
-"""``::`` 候选条(DESIGN.md §6.6,M5 重设计):输入法形态的叠加条。
+"""``::`` 候选条:输入法形态的叠加横条(不抢焦点,跟随光标)。
 
-横条 N 格:上 emoji(不透明)、下匹配词小字 + 数字序号;选中格高亮。
-非激活窗口(``WA_ShowWithoutActivating``,绝不抢焦点 —— 用户正在
-目标应用里打字);根背景走 paintEvent 自绘(坑 #13:translucent 窗
-alpha=0 像素命中穿透,QSS 背景不绘制)。
-
-定位:``GetGUIThreadInfo`` 取前台 caret,置于光标下方;无 caret
-(终端等)回退鼠标位置;屏幕边缘收拢。每次 update 重新定位(跟随打字)。
-
-点击外部关闭:非激活窗口收不到跨进程点击,可见期间 20ms 轮询
-``GetAsyncKeyState(VK_LBUTTON)`` 上升沿,光标不在条内 → 关条;
-在条内忽略(Qt ``mousePressEvent`` 正常收到,做点选提交)。
+非激活窗口(WA_ShowWithoutActivating)+ paintEvent 自绘背景
+(半透明窗 alpha=0 区域会点击穿透,QSS 背景不绘制)。
+定位:前台 caret 下方,无 caret 回退鼠标位置,屏幕边缘收拢。
+点击外部关闭:非激活窗口收不到跨进程点击,以 20ms 轮询左键状态实现。
 """
 
 import ctypes
@@ -61,10 +54,10 @@ user32.GetAsyncKeyState.restype = ctypes.c_short
 
 
 class CandidateBar(QWidget):
-    """候选条:状态由主线程 on_compose 驱动,只负责显示与点选。"""
+    """候选条:状态由主线程 compose 事件驱动,只负责显示与点选。"""
 
-    fallback_notice = Signal(str)  # 剪贴板降级发生(托盘气泡,FR6.4)
-    committed = Signal(dict)  # 点选提交 {"entry", "buf"}(app 统一回删注入)
+    fallback_notice = Signal(str)  # 剪贴板降级发生(托盘气泡用)
+    committed = Signal(dict)  # 点选提交 {"entry", "buf"}
 
     def __init__(self, cfg: dict) -> None:
         super().__init__()
@@ -79,13 +72,13 @@ class CandidateBar(QWidget):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint
                             | Qt.WindowType.Tool)
-        # 绝不抢焦点(用户正在目标应用打字)+ 半透明圆角自绘背景(坑 #13)
+        # 绝不抢焦点(用户正在目标应用打字)+ 半透明圆角自绘背景
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self._poll = QTimer(self)
-        self._poll.setInterval(20)  # 20ms 点击外部检测(§6.6)
+        self._poll.setInterval(20)  # 点击外部检测周期
         self._poll.timeout.connect(self._check_click_outside)
 
     # ── 状态驱动(app.on_compose 调用)──────────────────────────
@@ -96,7 +89,7 @@ class CandidateBar(QWidget):
     def update_candidates(self, items: list[tuple[dict, str]] | None,
                           buf: str = "") -> None:
         """刷新条内容并重定位。items=None 且 buf 空 → 默认常用;
-        空 items 且 buf 非空 → 「无匹配」灰暗态(条不关,DEVTest)。"""
+        空 items 且 buf 非空 → 「无匹配」灰暗态(条不关)。"""
         self._buf = buf
         if not buf:
             items = self._default_items
@@ -111,8 +104,7 @@ class CandidateBar(QWidget):
             self._btn_down = bool(user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000)
             self._poll.start()
         # 自绘内容变更必须显式调度重绘:条宽不变时 setFixedSize 同值不触发
-        # resize,layered 窗 move() 由系统搬运缓存纹理也不重绘 —— 数据换了
-        # 画面却停在旧候选(真机逐键不刷新 BUG;grab() 截图走整幅渲染测不出)
+        # resize,layered 窗 move() 也不重绘 —— 数据换了画面会停在旧候选
         self.update()
 
     def close_bar(self) -> None:
@@ -144,7 +136,7 @@ class CandidateBar(QWidget):
         return table.get(theme, table["dark"])
 
     def paintEvent(self, _ev) -> None:
-        """根背景自绘(坑 #13)+ 每格 emoji/词/序号;无匹配态整体灰暗。"""
+        """根背景自绘 + 每格 emoji/匹配词/序号;无匹配态整体灰暗。"""
         bg = QColor(*self._themed(_BAR_BG))
         border = QColor(*self._themed(_BAR_BORDER))
         painter = QPainter(self)
@@ -156,7 +148,7 @@ class CandidateBar(QWidget):
         painter.setPen(border)
         painter.drawPath(path)
 
-        if self._no_match:  # 无匹配:条不关,灰暗提示(DEVTest)
+        if self._no_match:  # 无匹配:条不关,灰暗提示
             painter.setPen(QColor(*self._themed(_BAR_FG_DIM)))
             hint = QFont()
             hint.setPixelSize(_TERM_PX + 1)
@@ -191,7 +183,7 @@ class CandidateBar(QWidget):
     # ── 定位(光标跟随)────────────────────────────────────────
 
     def _caret_screen_pos(self) -> QPoint | None:
-        """前台窗口 caret 屏幕坐标(GetGUIThreadInfo);无 caret → None。"""
+        """前台窗口 caret 屏幕坐标;无 caret → None。"""
         info = _GUITHREADINFO()
         info.cbSize = ctypes.sizeof(_GUITHREADINFO)
         if not user32.GetGUIThreadInfo(0, ctypes.byref(info)):
@@ -214,7 +206,7 @@ class CandidateBar(QWidget):
             y = max(pos.y() - 20 - self.height(), geo.top() + 4)
         self.move(x, y)
 
-    # ── 点击外部关闭(20ms 轮询)+ 条内点选 ─────────────────────
+    # ── 点击外部关闭(轮询)+ 条内点选 ──────────────────────────
 
     def _check_click_outside(self) -> None:
         pressed = bool(user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000)

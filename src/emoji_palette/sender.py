@@ -1,11 +1,7 @@
-"""SendInput Unicode 注入 / 焦点还原 / 剪贴板降级(DESIGN.md §6.4)。
+"""SendInput Unicode 注入 / 焦点还原 / 剪贴板降级(纯 ctypes,零 Qt 依赖)。
 
-时序约定:先 hide 面板 → 再还原焦点 → 再注入(坑 #9,调用方负责)。
+上屏时序(调用方负责):先 hide 面板 → 还原焦点 → 注入。
 非 BMP 字符按 UTF-16 代理对逐 code unit 注入,不使用剪贴板(降级除外)。
-纯 ctypes 零 Qt 依赖,可脱离事件循环单测。
-
-注:§6.4 骨架的 INPUT union 只含 KEYBDINPUT,x64 下 sizeof=32≠40,
-SendInput 会按错误步长读数组 —— 必须含 MOUSEINPUT 写全(见 DEVLOG)。
 """
 
 import ctypes
@@ -50,6 +46,7 @@ class INPUT(ctypes.Structure):
     _fields_ = [("type", ctypes.c_ulong), ("u", _INPUTU)]
 
 
+# x64 下 INPUT 必须为 40 字节(union 须含 MOUSEINPUT),否则 SendInput 步长错乱
 assert ctypes.sizeof(INPUT) == ctypes.sizeof(MOUSEINPUT) + 8, "INPUT 对齐错误"
 
 # 函数签名一次性声明(x64 下句柄为 64 位,默认 int 截断会出错)
@@ -82,12 +79,8 @@ def get_foreground_window() -> int:
 
 
 def restore_focus(hwnd: int, budget_s: float = 0.3) -> bool:
-    """还原焦点到指定窗口(坑 #2)。
-
-    SetForegroundWindow + 轮询校验;预算内失败则敲一次 Alt 解前台锁再试。
-    面板 hide 后激活会落到任意窗口、本进程变后台,首次切换可能超过
-    50ms(记事本冷启动实测),故预算默认 300ms。
-    """
+    """还原焦点到指定窗口:SetForegroundWindow + 轮询校验,
+    预算内失败则敲一次 Alt 解前台锁再重试。"""
     if not hwnd:
         return False
     deadline = time.monotonic() + budget_s
@@ -107,10 +100,9 @@ def restore_focus(hwnd: int, budget_s: float = 0.3) -> bool:
 
 
 def type_text(hwnd: int, text: str, backspaces: int = 0) -> bool:
-    """向 hwnd 注入 Unicode 文本(前置 N 次退格,文本扩展回删用)。
+    """向 hwnd 注入 Unicode 文本(可选前置 N 次退格,文本扩展回删用)。
 
-    退格对 + Unicode 单元合并为单次 SendInput(原子性:不完整序列
-    会把半截删除留在目标窗口)。任何单元注入失败即返回 False。
+    全部按键事件合并为单次 SendInput(原子性);任何单元失败返回 False。
     """
     if not text or not restore_focus(hwnd):
         return False
@@ -123,7 +115,7 @@ def type_text(hwnd: int, text: str, backspaces: int = 0) -> bool:
         arr[2 * b + 1].type = INPUT_KEYBOARD
         arr[2 * b + 1].ki = KEYBDINPUT(VK_BACK, 0, KEYEVENTF_KEYUP, 0, 0)
     for i in range(n_units):
-        scan = int.from_bytes(data[2 * i:2 * i + 2], "little")  # 含代理对拆分(坑 #6)
+        scan = int.from_bytes(data[2 * i:2 * i + 2], "little")  # 含代理对拆分
         down, up = arr[2 * (backspaces + i)], arr[2 * (backspaces + i) + 1]
         down.type = INPUT_KEYBOARD
         down.ki = KEYBDINPUT(0, scan, KEYEVENTF_UNICODE, 0, 0)
@@ -135,7 +127,7 @@ def type_text(hwnd: int, text: str, backspaces: int = 0) -> bool:
 
 
 def clipboard_fallback(text: str) -> bool:
-    """剪贴板降级(FR6.4):提权窗口等注入失败时复制,任何异常返回 False。"""
+    """剪贴板降级:注入失败(如提权窗口)时复制文本,任何异常返回 False。"""
     try:
         if not text or not user32.OpenClipboard(None):
             return False

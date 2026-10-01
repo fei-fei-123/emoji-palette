@@ -1,8 +1,8 @@
-"""打分与四路命中测试(DESIGN.md §6.3/§10 M1/§11.1)。
+"""打分与四路命中测试。
 
 验收核心:`屎`/`shit`/`shi`/`bb` 查询 → 💩 命中且排名前列;
 档位 > 频率 > 码点三级排序正确;同 emoji 多词命中不重复出项。
-`翔` 为 M3 别名,数据中不存在,以注入别名表覆盖(桩 docstring 承诺)。
+`翔` 为自定义别名,数据中不存在,以注入别名表覆盖。
 """
 
 from pathlib import Path
@@ -55,8 +55,7 @@ def test_four_way_hit_realdata(real_index: SearchIndex) -> None:
         assert POO in chars, f"查 {q!r} 未命中 💩"
     # 首位验收:屎/shit 为 💩 独有精确命中;
     # shi 的精确命中集 {1F450👐, 1F4A9💩, 1F944🥄, 1FAE1🫡} 码点升序下
-    # 💩 冷启动第 2(1F450 码点更小),首次上屏后频率学习固化首位(§11.1 前三位达标);
-    # bb 的 abbr 精确命中按码点 💩 第 3
+    # 💩 冷启动第 2,首次上屏后频率学习固化首位
     assert _ranks(real_index, "屎")[0] == POO
     assert _ranks(real_index, "shit")[0] == POO
     assert _ranks(real_index, "shi").index(POO) <= 2
@@ -66,7 +65,7 @@ def test_four_way_hit_realdata(real_index: SearchIndex) -> None:
 
 
 def test_alias_injection() -> None:
-    """注入别名表后 `翔` 命中 💩,且 alias 权重生效(M3 前向验证)。"""
+    """注入别名表后 ``翔`` 命中 💩,且 alias 权重生效。"""
     emojis = [_mk("1F4A9", POO), _mk("1F600", "😀", kw_py=["xiang"])]
     idx = SearchIndex(emojis, {}, aliases={POO: ["翔"]})
     assert _ranks(idx, "翔") == [POO]
@@ -78,7 +77,7 @@ def test_no_duplicate_emoji(real_index: SearchIndex) -> None:
 
 
 def test_perf_smoke(real_index: SearchIndex) -> None:
-    """性能冒烟:单键查询线性扫描,100 次平均 <50ms(FR3.3 毫秒级)。"""
+    """性能冒烟:单键查询 100 次平均 <50ms。"""
     import time
 
     start = time.perf_counter()

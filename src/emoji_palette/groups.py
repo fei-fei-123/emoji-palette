@@ -1,7 +1,4 @@
-"""Unicode emoji 组名中英映射常量(DESIGN.md §4.1)。
-
-key 与 emoji-test.txt 中 `# group:` 行的写法保持一致(注意使用 `&`)。
-"""
+"""Unicode emoji 组名中英映射(key 与 emoji-test.txt 的 group 行一致)。"""
 
 GROUP_ZH: dict[str, str] = {
     "Smileys & Emotion": "笑脸与情感",
@@ -17,7 +14,7 @@ GROUP_ZH: dict[str, str] = {
 
 
 def group_zh(name: str) -> str:
-    """组英文名 → 中文名;未映射返回空串(兼容 `and` 写法)。"""
+    """英文组名 → 中文名;未映射返回空串(兼容 `and` 写法)。"""
     if name in GROUP_ZH:
         return GROUP_ZH[name]
     return GROUP_ZH.get(name.replace(" and ", " & "), "")

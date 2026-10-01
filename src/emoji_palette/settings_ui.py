@@ -1,9 +1,7 @@
-"""设置窗 + 别名管理表格(DESIGN.md FR5.2)。
+"""设置窗 + 别名管理表格。
 
-热键录制用 QKeySequenceEdit(Qt 原生,无全局拦截),保存时转
-keyboard 库语法;别名表格 QTableWidget 两列(emoji / 逗号分隔别名)。
-保存 = 就地改共享 cfg/aliases → 落盘 → 发 applied 信号,由 app 负责
-热改绑 / 扩展重建 / 面板热应用(设置窗不自作主张碰运行态)。
+保存 = 就地改共享 cfg/aliases → 落盘 → 发 applied 信号,
+由 app 负责热改绑 / 扩展重建 / 面板热应用(设置窗不直接碰运行态)。
 """
 
 from PySide6.QtCore import Signal
@@ -63,7 +61,7 @@ def keyboard_to_qt(hotkey: str) -> str:
 
 
 class SettingsDialog(QDialog):
-    """设置窗:热键 / 扩展 / 别名 / 外观 / 自启(FR5.2)。"""
+    """设置窗:热键 / 扩展 / 别名 / 外观 / 自启。"""
 
     applied = Signal()  # 保存成功后发射(app 执行运行态变更)
 
@@ -80,7 +78,7 @@ class SettingsDialog(QDialog):
         root = QVBoxLayout(self)
         root.setSpacing(10)
 
-        # ── 全局热键(热键可改 = M4 验收)─────────────────────────
+        # ── 全局热键 ──────────────────────────────────────────────
         g_hot = QGroupBox("全局热键")
         f_hot = QFormLayout(g_hot)
         self.hotkey_edit = QKeySequenceEdit(
@@ -88,7 +86,7 @@ class SettingsDialog(QDialog):
         f_hot.addRow("呼出热键:", self.hotkey_edit)
         f_hot.addRow(QLabel("需含 Ctrl/Alt/Shift/Win 修饰键;保存后即时生效"))
 
-        # ── 文本扩展(§6.6)──────────────────────────────────────
+        # ── 文本扩展 ──────────────────────────────────────────────
         g_exp = QGroupBox("文本扩展")
         f_exp = QFormLayout(g_exp)
         ex = cfg["expansion"]
@@ -106,7 +104,7 @@ class SettingsDialog(QDialog):
         f_exp.addRow(self.exp_builtin)
         f_exp.addRow("进程黑名单(每行一个 .exe):", self.exp_blacklist)
 
-        # ── 外观(FR5.2)─────────────────────────────────────────
+        # ── 外观 ──────────────────────────────────────────────────
         g_ui = QGroupBox("外观")
         f_ui = QFormLayout(g_ui)
         p = cfg["panel"]
@@ -130,14 +128,14 @@ class SettingsDialog(QDialog):
         f_ui.addRow(self.chk_close)
         f_ui.addRow(self.chk_shift_keep)
 
-        # ── 开机自启(§6.8)──────────────────────────────────────
+        # ── 系统 ──────────────────────────────────────────────────
         g_auto = QGroupBox("系统")
         f_auto = QFormLayout(g_auto)
         self.autostart_check = QCheckBox("开机自动启动(注册表 HKCU Run)")
         self.autostart_check.setChecked(config.is_autostart())
         f_auto.addRow(self.autostart_check)
 
-        # ── 别名管理表格(FR5.2/FR3.5)───────────────────────────
+        # ── 别名管理表格 ───────────────────────────────────────────
         g_alias = QGroupBox("搜索别名(第二列逗号分隔;emoji 列直接粘贴字符)")
         v_alias = QVBoxLayout(g_alias)
         self.alias_table = QTableWidget(0, 2)
@@ -156,7 +154,7 @@ class SettingsDialog(QDialog):
         btn_add.clicked.connect(lambda: self._append_row("", ""))
         btn_del.clicked.connect(self._remove_selected)
 
-        # ── 保存/取消 ────────────────────────────────────────────
+        # ── 保存/取消 ──────────────────────────────────────────────
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save
                                    | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
@@ -184,7 +182,7 @@ class SettingsDialog(QDialog):
         hotkey = qt_to_keyboard_hotkey(self.hotkey_edit.keySequence())
         if not hotkey:
             self.hotkey_edit.setStyleSheet("border: 1px solid #e05555;")
-            return  # 热键非法不保存(提示样式),其余字段待用户修正后一并存
+            return  # 热键非法不保存,其余字段待用户修正后一并存
         self.hotkey_edit.setStyleSheet("")
 
         self._cfg["hotkey"] = hotkey
