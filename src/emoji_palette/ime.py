@@ -15,6 +15,9 @@ imm32 = ctypes.windll.imm32
 
 WM_IME_CONTROL = 0x283
 IMC_GETOPENSTATUS = 5
+IMC_GETCONVERSIONMODE = 0x0001  # WinUser.h 文档值(0x0101 为讹传,不响应)
+IME_CMODE_NATIVE = 0x0001       # 原生转写位(中文等)
+IME_CMODE_FULLSHAPE = 0x0008    # 全角位(英文全角同样产出非 ASCII)
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 imm32.ImmGetDefaultIMEWnd.argtypes = (wt.HWND,)
@@ -41,6 +44,35 @@ def ime_open(hwnd: int | None = None) -> bool:
         if not hime:
             return False
         return bool(user32.SendMessageW(hime, WM_IME_CONTROL, IMC_GETOPENSTATUS, 0))
+    except Exception:  # noqa: BLE001 — 钩子路径永不抛错
+        return False
+
+
+def ime_transcribing(hwnd: int | None = None) -> bool:
+    """IME 是否处于「会转写按键」的模式(FR4.3 门禁,2026-10-01 起)。
+
+    False = 纯英文键盘,或中文输入法的英文半角子模式(按键原样透传,
+    `::` 扩展可用);True = 中文原生/全角子模式(按键归 IME,扩展让位)。
+
+    判定 = IMC_GETOPENSTATUS(开合)∧ IMC_GETCONVERSIONMODE(子模式):
+    MS 拼音实测 中文子模式 mode=1025(原生|符号)、英文子模式 mode=0。
+    ImmGetConversionStatus 直连路在现代 TSF 应用上拿不到上下文(恒
+    NULL),WM_IME_CONTROL 通道是唯一可用探针(与 ime_open 同通道)。
+    查询值无法区分「英文子模式 0」与「无响应 0」:不响应此消息的
+    IME 在中文态会被误判为英文态(扩展介入)—— 已知极端情况,接受。
+    异常/无 IME → False(与 ime_open 失败语义一致)。
+    """
+    try:
+        hwnd = hwnd or user32.GetForegroundWindow()
+        if not hwnd:
+            return False
+        hime = imm32.ImmGetDefaultIMEWnd(hwnd)
+        if not hime:
+            return False
+        if not user32.SendMessageW(hime, WM_IME_CONTROL, IMC_GETOPENSTATUS, 0):
+            return False  # IME 关闭(纯英文键盘)
+        mode = user32.SendMessageW(hime, WM_IME_CONTROL, IMC_GETCONVERSIONMODE, 0)
+        return bool(mode & (IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE))
     except Exception:  # noqa: BLE001 — 钩子路径永不抛错
         return False
 

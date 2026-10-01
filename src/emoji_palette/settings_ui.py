@@ -94,7 +94,7 @@ class SettingsDialog(QDialog):
         ex = cfg["expansion"]
         self.exp_enabled = QCheckBox("启用(:: 前缀 → emoji)")
         self.exp_enabled.setChecked(bool(ex["enabled"]))
-        self.exp_builtin = QCheckBox("内置英文词参与匹配(kw_en/kw_abbr)")
+        self.exp_builtin = QCheckBox("内置关键词参与候选(英文/缩写/拼音)")
         self.exp_builtin.setChecked(bool(ex["builtin_keywords"]))
         self.exp_prefix = QLineEdit(str(ex["prefix"]))
         self.exp_prefix.setMaxLength(4)
@@ -123,6 +123,12 @@ class SettingsDialog(QDialog):
         f_ui.addRow("主题:", self.theme_combo)
         f_ui.addRow("图标尺寸(px):", self.icon_spin)
         f_ui.addRow("面板宽度(px):", self.width_spin)
+        self.chk_close = QCheckBox("上屏后自动关闭面板")
+        self.chk_close.setChecked(bool(p.get("close_after_submit", True)))
+        self.chk_shift_keep = QCheckBox("Shift+Enter 上屏后保持面板(连续上屏)")
+        self.chk_shift_keep.setChecked(bool(p.get("shift_enter_keeps_open", True)))
+        f_ui.addRow(self.chk_close)
+        f_ui.addRow(self.chk_shift_keep)
 
         # ── 开机自启(§6.8)──────────────────────────────────────
         g_auto = QGroupBox("系统")
@@ -194,6 +200,8 @@ class SettingsDialog(QDialog):
         p["theme"] = "light" if self.theme_combo.currentIndex() == 1 else "dark"
         p["icon_size"] = self.icon_spin.value()
         p["width"] = self.width_spin.value()
+        p["close_after_submit"] = self.chk_close.isChecked()
+        p["shift_enter_keeps_open"] = self.chk_shift_keep.isChecked()
         self._cfg["autostart"] = self.autostart_check.isChecked()
 
         # 别名表 → 共享 dict(就地清空重填,保持引用)

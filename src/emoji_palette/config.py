@@ -32,6 +32,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "position": "cursor",
         "show_recent": True,
         "recent_count": 24,
+        # M5/§8:上屏后是否自动关面板;Shift+Enter 强制保持(双开关可配)
+        "close_after_submit": True,
+        "shift_enter_keeps_open": True,
     },
     "expansion": {
         "enabled": True,

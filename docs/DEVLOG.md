@@ -17,12 +17,50 @@
 | M2 | 分类浏览 + 频率学习 + 信息栏 | 8 分类可切换;常用栏随使用更新 | ✅ 完成(2026-10-01) |
 | M3 | 右键别名 + 文本扩展 + IME 检测 | `::shit ␣`→💩(英文态);中文 IME 开启时扩展自动失效不干扰 | ✅ 完成(2026-10-01) |
 | M4 | 托盘 + 设置窗 + 自启动 + 打包 | PyInstaller 单 exe 可用;开机自启可开关;热键可改 | ✅ 完成(2026-10-01) |
+| M5 | 面板重构 + 交互重做 + `::` 候选条 + 双 BUG 修复 | 网格空白区滚轮不穿透;导航模式/+/-/keep-open;`::shi ␣`→💩;热键末键不进搜索框 | ◐ 候选条链路真机确认 ✅(2026-10-01);BUG② 残留字符/滚轮/导航/keep-open 复验待过(§11 增补 11-14) |
 
-**当前:** M4 完成,DESIGN §10 全里程碑 ✅。遗留 §11 手动验收清单(交付前用户逐项过)与重启验证自启动。
+**当前:** M5 代码交付(用户实测反馈 docs/DEVTest.md 三类需求全部落地)。BUG①(`::` 无反应)真机闭环 ✅:数据面(kw_py 缺席)+ 状态机(修饰键流打断武装)+ 门禁(IME 英文子模式误拦)三层真因全部修复并由用户确认;BUG②/keep-open/滚轮穿透属真机时序/命中行为,待用户复验。
 
 ## 开发日志
 
-### 2026-10-01 · M4 托盘 + 设置窗 + 自启动 + 打包完成 ✅
+### 2026-10-01 · M5 面板重构 + 交互重做 + `::` 候选条 + 双 BUG 修复 ◐(代码完成,真机复验待用户)
+
+**背景:** 用户提交 docs/DEVTest.md 实测报告:① 面板无背景、滚轮穿透;② 控制体验(焦点/导航/+/- 切类/keep-open/`::` 改输入法候选条);③ BUG① `::shi ␣` 无反应、BUG② 热键呼出后 E 落进搜索框。按 U0-U6 计划逐单元交付。
+
+**产出:** panel.py 重构(paintEvent 自绘根背景 + 两模式焦点模型 keyPressEvent/eventFilter + 热键末键残留过滤 + keep-open 焦点舞步)、candidate.py 新增(`::` 候选条:非激活叠加窗 + caret 跟随 + 20ms 点击外部轮询)、expander.py 重写(O(1) 状态机 + compose 信号 + 全抑制矩阵)、search.py 增 `prefix_candidates`(全词型,BUG① 数据面修复点)/删 `expander_table`、config.py 增 `close_after_submit`/`shift_enter_keeps_open`、settings_ui.py 增两开关、app.py 候选条装配(`_commit_candidate` 统一提交 + 剪贴板降级补齐)、diag_expand.py 诊断脚本(根,开发工具)。测试 50 → **81 全过**,ruff 无告警。
+
+**验证结果(离屏 + 真平台渲染;真机复验项见 DESIGN §11 增补 11-14):**
+- **滚轮穿透根因修复** ✓:根背景 alpha 235/242 全窗 >0(截图逐像素验证四角/中心/网格区 alpha);offscreen + 真平台双份截图目检深/浅主题;
+- **BUG① 数据面** ✓:diag 阶段2 实测 `'shi' -> 9 项: 👐(shi), 💩(shi), 🥄(shi)`、`'shit' -> 💩(shit)` 居首——kw_py 现已参与候选(M4 静默替换表只取 kw_en/kw_abbr 漏拼音);回归测试 `test_prefix_candidates_pinyin_shi_hits_poo` 锁定;
+- **候选条渲染** ✓:真平台(windows QPA)截图目检——彩色 emoji、小字词+序号、选中格蓝色高亮、深色圆角条全部正常;offscreen 截图的豆腐块确认为该平台字体伪影(U1 面板截图同样,非代码问题);
+- 状态机矩阵全分支表驱动测试(31 用例);面板新交互 16 用例;候选条 7 用例。
+
+**设计决议与偏差(DESIGN v1.1 已同步):**
+1. **候选条组合文本可见**:字母照常打进目标应用,条只是叠加;提交才回删+注入(单次 SendInput)。弃「全吞+重放」纯 IME 方案——键盘安全原则下最坏情况只是「字符打出来了」而非「字符消失」;Esc/↑↓/点外关条时已打文本保留原样;
+2. **提交 = 空格 + Enter 双通道**(用户确认);无命中 + 空格 = 放行 + 收条(「无命中不关条」指继续打字筛选时,空格仍是「我想打空格」信号);
+3. **←→ 仅在有候选时劫持**(条内移动);无候选放行并收条——光标左移会破坏「回删镜像缓冲」假设;
+4. **has_candidates 跨线程回写**:主线程每次条刷新后 `set_has_candidates`,钩子线程 GIL 原子读,决定空格/数字吞键——字符解析全部移出钩子线程(原 matcher 查表也删了);
+5. **数字 0 恒入缓冲**(M4 表时代 0 无格;候选条时代 `100` 类词需要);数字越界(条只有 3 格按 5)吞键后安静收条;
+6. **keep-open 时序**:先置 `_hold_grace`(0.6s 失活豁免)再 type_text,否则 event() 把「注入时面板失活」误判为点外关闭;完成后 restore_focus 抢回 + 选中下移一行;
+7. **圆角外 8px 四角仍穿透**(layered 窗物理限制),接受并记 DESIGN 决策;**严禁 setWindowOpacity**(整窗淡化会伤 emoji,改根背景 alpha 235/242 实现「些许透明」);
+8. **面板默认焦点 = 面板自身**(导航模式),打字自动进框;↑↓ 从框回面板;`+/-` 切类先清空文本;Tab 框↔面板互换(M2 的「搜索↔分类」语义废弃);
+9. `expander_table`/`rebuild_table`/`aliases_changed`→重建链路整体删除——索引 `set_aliases` 已在别名保存时热更,`prefix_candidates` 每次现查自然生效;设置窗 `exp_builtin` 文案改「内置关键词参与候选(英文/缩写/拼音)」。
+
+**过程踩坑(重要,含两起事故):**
+- ⚠️ **事故 1:调试片段未打桩跑真注入,用户剪贴板被覆盖为 😀(不可恢复)**——写驱动脚本时漏了 monkeypatch sender,真实 `type_text` 失败走 `clipboard_fallback`。教训:凡离屏/诊断驱动涉及 `_submit`/`_commit` 路径,sender 打桩必须先于首次运行,不能「先跑一次看看」;
+- ⚠️ **事故 2:同因产生 `%APPDATA%\EmojiPalette\frequency.json = {"😀": 1}`**(真注入后 bump)——删除被权限系统拒绝(项目树外的用户数据,应当),已留置(效果仅 😀 在常用栏出现一次),待用户自行处置;
+- `WA_TranslucentBackground` 顶层窗 QSS 背景任何写法都不绘制 → 坑 #13(根背景必须 paintEvent 自绘);连带发现网格 QSS `background: transparent` 会把像素 alpha 抹零,须 `setAutoFillBackground(False)` 让根背景透出;
+- `QKeySequence(tail)[0]` 在 PySide6 返回 QKeyCombination,直接 `> int` 抛 TypeError,须 `.toCombined()`;
+- offscreen 平台 `QApplication.setActiveWindow(None)` 是弃用 no-op(activeWindow 仍= 面板)→ 失活关闭测试须 monkeypatch 模块级 QApplication 符号注入假 activeWindow;
+- offscreen 字体渲染豆腐(emoji/中文)→ 截图目检必须补真平台一份(候选条 `WA_ShowWithoutActivating` 不抢焦点,可安全真平台渲染后 grab)。
+
+**遗留:**
+- **真机复验清单(用户)**:DESIGN §11 增补 11-14 —— 14(候选条全链路)已过 ✅;余:11 按住热键稍久无残留字符(BUG②)、12 滚轮不穿透、13 导航模式+/-切类、4/Shift+Enter keep-open;
+- **BUG① 真因已锁定并修复,真机确认 ✅(2026-10-01 用户协助诊断)**:用户回报 英文布局下门禁放行(阶段3)但 `::` 仍无条、阶段4 无输出 —— 排除配置/数据/门禁后锁定状态机武装段:`:` 需按住 Shift 输入,**两个 `:` 之间的 shift 按下事件(松开重按/按住 >0.5s 的系统自动重复)会把 ARMED 打回 IDLE**,第二个 `:` 只能重新武装,永远进不了 REC。E2E 程序化驱动一气呵成按住 Shift,测不出人手松开 —— 修复:修饰键流(shift/ctrl/alt/windows 及左右变体、alt gr)在 ARMED/REC 放行且不打断状态,回归测试 `test_modifier_streams_do_not_break_state` 锁定;DESIGN §6.6 矩阵已同步。**用户真机复验:英文布局 `::` 正常出条**;
+- **中文输入法英文子模式门禁已修复,用户真机确认 ✅(三轮用户协助探测定案,2026-10-01)**:第三轮 `--ime-probe`(改用文档常量 `IMC_GETCONVERSIONMODE=0x0001`)实测 **MS 拼音中文子模式 mode=1025(原生|符号)、英文子模式 mode=0** —— 子模式可探测。实现:`ime.ime_transcribing()` 两级判定(IME 开 ∧ 转换模式含 原生/全角 位 → 拦截;英文半角子模式 → 放行),app 门禁与诊断脚本均已换用,新增 `tests/test_ime.py` 6 用例(含 mode=0 放行回归、全角英文拦截、异常语义)。探针结论记入 DESIGN §6.5:C 直连路(AttachThreadInput+ImmGetConversionStatus)在 TSF 应用上 `ImmGetContext` 恒 NULL 死路,B 通道是唯一探针且必须用文档值 0x0001(讹传 0x0101 不响应)。已知极端情况:不响应 B 的 IME 中文态会被误判为英文态(扩展介入),接受并记录;英文全角(仅 FULLSHAPE 位)因产出非 ASCII、回删镜像错位一并拦截;
+- `--live` 已升级逐键打印(键名/状态迁移/吞键/事件),真机「无反应」不再沉默;
+- 临时截图目录 `%TEMP%\ep_m5\` 未清理(用户目检后可删);
+- git 提交待用户确认。
 
 **产出:** config.py 增 autostart 读写(HKCU Run 键)、panel.py 增浅色 QSS + `apply_cfg` 热应用 + `fallback_notice` 信号、settings_ui.py 完整设置窗(热键录制/扩展/外观/自启/别名表格)、hotkey.py 增 `HookWatchdog`、app.py 托盘 + 设置 + 看护装配 + 启动自启同步、build.spec。测试 43 → 50 全过,ruff 无告警。
 

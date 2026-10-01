@@ -21,6 +21,7 @@ from PySide6.QtGui import QFont, QGuiApplication, QIcon, QPainter, QPixmap, QRaw
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from emoji_palette import config, ime, sender
+from emoji_palette.candidate import CandidateBar
 from emoji_palette.expander import ExpandBridge, Expander, ExpanderHook
 from emoji_palette.hotkey import HookWatchdog, HotkeyBridge, HotkeyManager
 from emoji_palette.panel import EmojiPanel
@@ -134,7 +135,7 @@ def main() -> int:
     bridge.activated.connect(toggle)
     manager.start(cfg["hotkey"])
 
-    # ── 文本扩展(FR4)::: 前缀录制 → 回删注入;任务回主线程执行 ──
+    # ── 文本扩展(M5/§6.6)::: 前缀录制 → 候选条;匹配在主线程 ──
     expansion = cfg["expansion"]
     blacklist = set(expansion["process_blacklist"])
 
@@ -148,28 +149,63 @@ def main() -> int:
             return False
         if ime.foreground_process_name() in blacklist:
             return False
-        return not ime.ime_open()
+        return not ime.ime_transcribing()
 
-    machine = Expander(index.expander_table(expansion["builtin_keywords"]).get,
-                       gate, expansion["prefix"])
+    machine = Expander(gate, expansion["prefix"])
+    bar = CandidateBar(cfg)
 
-    def rebuild_table() -> None:
-        machine.set_table(index.expander_table(
-            expansion["builtin_keywords"]).get)
+    def _bar_defaults() -> list[tuple[dict, str]]:
+        """空缓冲默认候选:常用 top 优先,不足以面板固定常用条补足。"""
+        p = cfg["panel"]
+        recents = (index.top_frequent(9) if p.get("show_recent", True) else [])
+        seen = {e["char"] for e in recents}
+        extra = [e for e in panel._default_entries if e["char"] not in seen]
+        return [(e, "常用") for e in (recents + extra)[:9]]
 
-    panel.aliases_changed.connect(rebuild_table)  # 右键编辑别名 → 即时生效
+    def _commit_candidate(entry: dict, back: int) -> None:
+        """候选条提交(键盘/点选共用):收条 → 回删注入;失败剪贴板降级。"""
+        bar.close_bar()
+        hwnd = sender.get_foreground_window()
+        ok = bool(hwnd) and sender.type_text(hwnd, entry["char"], backspaces=back)
+        if not ok and cfg["advanced"].get("fallback_to_clipboard", True):
+            ok = sender.clipboard_fallback(entry["char"])
+            if ok:
+                on_fallback(entry["char"])  # 托盘气泡(修 M3 起扩展路径无降级的不对称)
+        if ok:
+            config.bump_frequency(entry["char"])
+
+    def on_compose(ev: dict) -> None:
+        """compose 事件(主线程):show/update 刷新条;left/right 移动;
+        digit/commit 提交;close 收条。条内有无候选回写状态机(吞键依据)。"""
+        kind = ev.get("event")
+        buf = ev.get("buf", "")
+        if kind in ("show", "update"):
+            if kind == "show":
+                bar.set_default_items(_bar_defaults())
+            items = (index.prefix_candidates(
+                buf, use_builtin=expansion["builtin_keywords"]) if buf else None)
+            bar.update_candidates(items, buf)
+            machine.set_has_candidates(bool(bar.selected()))
+        elif kind == "left":
+            bar.move_selection(-1)
+        elif kind == "right":
+            bar.move_selection(1)
+        elif kind == "close":
+            bar.close_bar()
+        elif kind in ("digit", "commit"):
+            item = (bar.item_at_index(int(ev.get("n", 0)) - 1)
+                    if kind == "digit" else bar.selected())
+            if item:
+                _commit_candidate(item[0], int(ev.get("back", 0)))
+            else:
+                bar.close_bar()  # 数字越界:安静收条(键已吞)
 
     expand_bridge = ExpandBridge()
     expand_hook = ExpanderHook(machine, expand_bridge)
-
-    def run_expand(task: dict) -> None:
-        """主线程执行回删+注入(钩子回调内 SendInput 有重入风险,§6.6)。"""
-        hwnd = sender.get_foreground_window()
-        if hwnd and sender.type_text(hwnd, task["text"],
-                                     backspaces=task["back"]):
-            config.bump_frequency(task["text"])
-
-    expand_bridge.action.connect(run_expand)
+    expand_bridge.compose.connect(on_compose)
+    bar.committed.connect(
+        lambda ev: _commit_candidate(ev["entry"],
+                                      len(expansion["prefix"]) + len(ev["buf"])))
     if expansion["enabled"]:
         expand_hook.start()
 
@@ -177,7 +213,6 @@ def main() -> int:
     def reapply_runtime() -> None:
         manager.rebind(cfg["hotkey"])
         machine.set_prefix(expansion["prefix"])
-        rebuild_table()
         blacklist.clear()
         blacklist.update(expansion["process_blacklist"])
         if expansion["enabled"]:
@@ -206,7 +241,7 @@ def main() -> int:
     tray.show()
 
     def show_panel() -> None:
-        panel.popup(sender.get_foreground_window())
+        panel.popup(sender.get_foreground_window(), from_hotkey=False)
 
     def toggle_hotkey(checked: bool) -> None:
         if checked:

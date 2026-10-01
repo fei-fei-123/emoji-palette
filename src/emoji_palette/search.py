@@ -81,27 +81,37 @@ class SearchIndex:
         used.sort(key=lambda i: (-self._freq[self._chars[i]], self._cps[i]))
         return [self._emojis[i] for i in used[:limit]]
 
-    def expander_table(self, use_builtin: bool = True) -> dict[str, str]:
-        """文本扩展匹配表(FR4.2):term(小写拉丁)→ emoji 字符。
+    def prefix_candidates(self, buf: str, limit: int = 9,
+                          use_builtin: bool = True) -> list[tuple[dict, str]]:
+        """``::`` 候选条数据源(M5/§6.6):前缀匹配,返回 (entry, 匹配词)。
 
-        内置取 kw_en/kw_abbr(§6.6;kw_py 不参与 —— `::` 录制是精确全等,
-        拼音子串价值低且误触多),同词先到先得(索引序 = emoji-test 序);
-        别名后入覆盖内置(优先)。含空格/非拉丁词无法被 [a-z0-9] 缓冲命中,剔除。
+        扫描全部词型(含 kw_py —— `::shi` → 💩 即此路径,M5 修 BUG①);
+        同 emoji 取最优词:别名(1.2 权重)优先,词短优先;排序 = 命中
+        词数感 + 频率加权 + 码点 tie-break(复用 query 打分思想)。
+        ``use_builtin=False`` 时仅别名段。空 buf 返回空列表(由调用方
+        填默认常用)。
         """
-        table: dict[str, str] = {}
-        if use_builtin:
-            for e in self._emojis:
-                for key in ("kw_en", "kw_abbr"):
-                    for term in e.get(key, ()):
-                        term = term.strip().lower()
-                        if term.isascii() and term.isalnum():
-                            table.setdefault(term, e["char"])
-        for char, words in self._aliases.items():
-            for term in words:
-                term = term.strip().lower()
-                if term.isascii() and term.isalnum():
-                    table[term] = char
-        return table
+        q = buf.strip().lower()
+        if not q:
+            return []
+        capped = [min(self._freq.get(c, 0), _FREQ_CAP) for c in self._chars]
+        best: dict[int, tuple[float, str]] = {}  # emoji_idx → (score, term)
+        for term, idx, weight in self._terms:
+            if not use_builtin and weight <= 1.0:
+                continue  # 关内置:仅保留别名段(weight 1.2)
+            if not term.startswith(q):
+                continue
+            # 前缀完全相等 > 词短(信息量大)> 频率加权
+            exact = 1 if term == q else 0
+            score = (exact * _TIER_EXACT * _TIER_BASE
+                     - len(term) * _TIER_BASE / 64.0
+                     + capped[idx] * weight)
+            cur = best.get(idx)
+            if cur is None or score > cur[0]:
+                best[idx] = (score, term)
+        ranked = sorted(best.items(),
+                        key=lambda kv: (-kv[1][0], self._cps[kv[0]]))
+        return [(self._emojis[i], term) for i, (_, term) in ranked[:limit]]
 
     def query(self, text: str, limit: int = _DEFAULT_LIMIT) -> list[dict]:
         """四路命中 + 三级排序,返回条目 dict 引用列表(只读)。"""
