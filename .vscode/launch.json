@@ -57,7 +57,7 @@
             "name": "📦 打包单文件 exe (PyInstaller)",
             "type": "debugpy",
             "request": "launch",
-            "module": "pyinstaller",
+            "module": "PyInstaller",
             "args": ["--noconfirm", "build.spec"],
             "cwd": "${workspaceFolder}",
             "env": { "PYTHONUTF8": "1" },
