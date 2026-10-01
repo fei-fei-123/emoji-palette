@@ -110,6 +110,10 @@ class CandidateBar(QWidget):
             self.raise_()
             self._btn_down = bool(user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000)
             self._poll.start()
+        # 自绘内容变更必须显式调度重绘:条宽不变时 setFixedSize 同值不触发
+        # resize,layered 窗 move() 由系统搬运缓存纹理也不重绘 —— 数据换了
+        # 画面却停在旧候选(真机逐键不刷新 BUG;grab() 截图走整幅渲染测不出)
+        self.update()
 
     def close_bar(self) -> None:
         self._poll.stop()

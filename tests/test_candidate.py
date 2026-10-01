@@ -94,6 +94,20 @@ def test_close_bar_stops_polling():
     assert not bar.isVisible()
 
 
+def test_update_candidates_schedules_repaint():
+    """真机 BUG 回归:逐键 update 只改数据不重绘(条宽不变时无 resize,
+    layered 窗 move 不重绘;grab() 截图强制整幅渲染会掩盖)—— 必须
+    显式调度 update()。实例级遮蔽捕获调用。"""
+    bar = _bar()
+    bar.set_default_items(_items("😀"))
+    bar.update_candidates(None, "")
+    called: list[int] = []
+    bar.update = lambda: called.append(1)  # type: ignore[method-assign]
+    bar.update_candidates(_items(*"ab"), "a")  # 等宽刷新(2 格 → 2 格)
+    bar.update_candidates(_items("😀"), "ab")
+    assert len(called) == 2
+
+
 def test_reposition_falls_back_to_cursor():
     """offscreen 无前台 caret → 回退鼠标坐标,不抛错且落屏内。"""
     bar = _bar()

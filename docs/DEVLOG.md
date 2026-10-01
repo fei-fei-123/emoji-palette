@@ -23,6 +23,16 @@
 
 ## 开发日志
 
+### 2026-10-01 · M5 补1:候选条逐键不刷新(重绘调度缺失)✅
+
+**现象(用户真机):** `::` 出条后输入 `shi`,条上 emoji 不刷新;按 ←/→ 才显示正确候选。
+
+**根因:** `update_candidates` 只改数据不调度重绘 —— 条宽不变时(前缀过滤常驻 9 格)`setFixedSize` 同值不触发 resize;layered 窗 `move()` 由系统位块搬运缓存纹理,不重绘。`move_selection` 里有显式 `self.update()`,所以 ←/→ 一按就刷出来 —— 恰好自证数据链路(compose update 事件 → `prefix_candidates` → `_items`)全程正确,纯绘制调度缺失。离屏截图目检被 `grab()` 掩盖(强制整幅渲染,不走脏区调度)。
+
+**修复:** `update_candidates` 末尾显式 `self.update()`;回归测试 `test_update_candidates_schedules_repaint`(实例级遮蔽捕获)。教训并入 DESIGN 坑 #13。
+
+**验证:** 测试 88 → 89 全过,ruff 无告警;真机复验 = 逐键出候选。
+
 ### 2026-10-01 · M5 面板重构 + 交互重做 + `::` 候选条 + 双 BUG 修复 ◐(代码完成,真机复验待用户)
 
 **背景:** 用户提交 docs/DEVTest.md 实测报告:① 面板无背景、滚轮穿透;② 控制体验(焦点/导航/+/- 切类/keep-open/`::` 改输入法候选条);③ BUG① `::shi ␣` 无反应、BUG② 热键呼出后 E 落进搜索框。按 U0-U6 计划逐单元交付。

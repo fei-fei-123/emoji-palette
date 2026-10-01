@@ -437,7 +437,7 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 | 10 | 多显示器下面板跑到屏幕外 | §6.2 按 `screenAt` 定位 + 边缘收拢 |
 | 11 | keyboard 库热键与 suppress 钩子并存时的重入 | 统一走同一个 hook 句柄管理(watchdog 重挂两者一起) |
 | 12 | Win10 与 Win11 的 Segoe UI Emoji 版本差异(新 emoji 显示为豆腐) | 数据层标注 `version` 字段,设置提供「隐藏本机不支持的版本」开关(读取系统字体支持度,选做) |
-| 13 | **自定义 QWidget 子类不自动绘制 QSS 背景**:顶层 `WA_TranslucentBackground` 窗在本环境(PySide6 6.11.2/Win10)任何 QSS 背景写法都不绘制 → 整窗 alpha=0,Windows layered 窗对 alpha=0 像素做命中测试穿透,滚轮/点击落给后方应用;子控件 QSS `background: transparent` 同样会把该区域 alpha 抹零 | 根背景一律 `paintEvent` + `QPainter` 自绘(面板与候选条同法);网格关 `setAutoFillBackground`(让根背景透出);另附带发现:`QKeySequence(...)[0]` 返回 `QKeyCombination` 须 `.toCombined()` 取整键值 |
+| 13 | **自定义 QWidget 子类不自动绘制 QSS 背景**:顶层 `WA_TranslucentBackground` 窗在本环境(PySide6 6.11.2/Win10)任何 QSS 背景写法都不绘制 → 整窗 alpha=0,Windows layered 窗对 alpha=0 像素做命中测试穿透,滚轮/点击落给后方应用;子控件 QSS `background: transparent` 同样会把该区域 alpha 抹零 | 根背景一律 `paintEvent` + `QPainter` 自绘(面板与候选条同法);网格关 `setAutoFillBackground`(让根背景透出);自绘内容变更须显式 `update()`(等宽不 resize、layered 窗 move 只搬缓存纹理均不重绘);另附带发现:`QKeySequence(...)[0]` 返回 `QKeyCombination` 须 `.toCombined()` 取整键值,离屏 `grab()` 强制整幅渲染会掩盖重绘调度缺失 |
 
 ---
 
