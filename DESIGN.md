@@ -291,8 +291,9 @@ panel.move(x, y); panel.show(); panel.raise_(); panel.activateWindow()
 ```python
 q = s.strip().lower()
 # 档位:3=某 term == q;2=term.startswith(q);1=q in term
-# 得分 = tier * 10000 + min(freq, 9999) * weight
-# 取 top 50,同分按码点升序
+# 得分 = tier * 20000 + min(freq, 9999) * weight   ← 基数须 > 9999*1.2≈12000,
+#                                              否则高频前缀可反超低频精确命中(实测修正)
+# 取 top 50,同分按码点升序;同一 emoji 多词命中先取最高分去重
 ```
 纯内存遍历(~3700 emoji × ~30 词 ≈ 11 万项,Python 线性扫 <10ms,可接受;若实测慢,再按首字母建桶,勿提前优化)。
 
@@ -326,15 +327,18 @@ def type_text(hwnd: int, text: str) -> bool:
         user32.SendInput(2, ctypes.byref(down) 之类数组, ctypes.sizeof(INPUT))
     return True
 ```
-(以上为骨架示意,落地时按 ctypes 结构体对齐规范写全,注意 x64 下 INPUT 结构含 padding。)
+(以上为骨架示意,落地时按 ctypes 结构体对齐规范写全,注意 x64 下 INPUT 结构含 padding。
+**实测硬约束:union 必须含 MOUSEINPUT/KEYBDINPUT/HARDWAREINPUT 全部三成员**,
+只写 KEYBDINPUT 时 sizeof=32≠40,SendInput 会按错误步长读数组。)
 
 焦点还原 `restore_focus(hwnd)`:
 ```python
-user32.SetForegroundWindow(hwnd)
-# 轮询校验,最多 10 次 × 5ms:
-#   GetForegroundWindow() == hwnd 即成功
-# 失败(Windows 前台锁)→ 备用手段:先 keybd_event(VK_MENU, 0, 0, None) 敲一下 Alt 再 SetForegroundWindow
-# 仍失败 → 返回 False(上层走 FR6.4 降级)
+# 预算式轮询(默认 300ms,记事本冷切换实测会超 50ms):
+#   while 未到 deadline:
+#       user32.SetForegroundWindow(hwnd)
+#       4 次 × 5ms 校验 GetForegroundWindow() == hwnd → 成功返回 True
+#       首轮失败 → keybd_event 敲一下 Alt(VK_MENU)解前台锁后继续
+#   超预算 → 返回 False(上层走 FR6.4 降级)
 ```
 时序约定:**先 hide 面板,再还原焦点,再注入**(面板可见时会抢走注入目标)。
 
@@ -359,21 +363,24 @@ REC  --(Esc)--> IDLE(放行)
 REC  --(缓冲 > 24 字符)--> IDLE(放行)
 ```
 - 匹配表:别名表(优先)+ 内置 `kw_en/kw_abbr`(可配置关闭内置参与);
-- 回删:注入前发送 N 次 `Backspace`(N = 前缀长度 + 缓冲长度),用 `keyboard.send` 或 SendInput;
-- suppress 实现:`keyboard.hook(callback, suppress=True)` 模式下回调返回 True 的按键被吞;由于抑制决策=查 dict(O(1)),回调耗时微秒级,满足钩子时限;
+- 回删:注入前发送 N 次 `Backspace`(N = 前缀长度 + 缓冲长度),与文本合并为单次 SendInput(原子性);
+- suppress 实现:`keyboard.hook(callback, suppress=True)`;回调返回值遵循 `_winkeyboard.prepare_intercept` 约定:**True=放行 / False=拦截**(与直觉相反,M3 实测踩坑)。抑制决策=查 dict(O(1)),回调耗时微秒级,满足钩子时限;
+- 注入不在钩子回调内执行(SendInput 在低级钩子内重入有超时风险),任务经 Qt 信号排队至主线程;
 - **注意**:全局 suppress 钩子会拦截所有按键,务必保证异常路径(try/except 包裹)都「默认放行」,任何 bug 不得导致键盘卡死。
 
 ### 6.7 钩子保活(Watchdog)
 - Windows 对低级钩子回调有超时限制(注册表 `LowLevelHooksTimeout`,未配置时系统默认约 300ms),Python GC/卡顿超时会被系统静默摘除钩子;
-- 对策:每 30s 由 watchdog 线程发一次测试信号校验钩子活性,校验失败 → 自动重挂 `keyboard.hook`/`add_hotkey`,并托盘气泡提示一次(最多每小时 1 次);
+- 对策(实现偏差,原案「发测试键校验」弃用——全局注入在本机不可靠且会向用户前台应用打进按键):每 30s 校验 `keyboard` 库监听线程存活,失活 → 置 `listening=False` 强制重启监听 + 业务层重挂全部钩子,托盘气泡提示(失活事件本身 ≤1 次/小时节流);
 - 同时把 GC 冻结:`gc.freeze()` 于启动完成后,减少全代回收停顿。
 
 ### 6.8 自启动
 ```python
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-# 开:winreg.SetValueEx(HKEY_CURRENT_USER, RUN_KEY, "EmojiPalette", 0, REG_SZ, sys.executable 或打包后路径)
+# 开:winreg.SetValueEx(HKEY_CURRENT_USER, RUN_KEY, "EmojiPalette", 0, REG_SZ, 命令串)
 # 关:winreg.DeleteValue(...)
 ```
+- 命令串:打包态 = exe 完整路径;开发态 = `python -X utf8 -c "import sys; sys.path.insert(0, r'<src>'); from emoji_palette.app import main; main()"`(Run 键无法设置环境变量,须内联 PYTHONPATH 与 UTF-8 模式);
+- json `autostart` 为意图源:应用启动时若与注册表不一致,以 json 为准写入(否则设置窗读注册表会与 json 永久脱节);设置窗/托盘切换时两处同步更新。
 
 ---
 
@@ -402,7 +409,8 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 {
   "hotkey": "alt+e",
   "panel": {
-    "width": 480,
+    "width": 600,
+    "height": 440,
     "columns": 10,
     "icon_size": 36,
     "theme": "dark",
@@ -420,7 +428,8 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
   "autostart": true,
   "advanced": {
     "hook_watchdog": true,
-    "fallback_to_clipboard": true
+    "fallback_to_clipboard": true,
+    "hide_unsupported": true
   }
 }
 ```
@@ -440,7 +449,7 @@ emoji-palette/
 │   └── index.json           # 构建产物(gitignore,首启检测缺失自动引导运行 build_data.py)
 ├── src/emoji_palette/
 │   ├── __main__.py          # 入口:python -m emoji_palette
-│   ├── app.py               # QApplication 装配、单实例锁(QLocalServer)、托盘
+│   ├── app.py               # QApplication 装配、单实例锁(命名互斥体,见 DEVLOG M1)、托盘
 │   ├── panel.py             # 搜索面板(§5)
 │   ├── settings_ui.py       # 设置窗 + 别名管理表格
 │   ├── hotkey.py            # 热键注册/改绑 + Watchdog

@@ -13,14 +13,131 @@
 | 里程碑 | 内容 | 验收标准 | 状态 |
 |---|---|---|---|
 | M0 | build_data.py + 索引 | `data/index.json` ≥3700 条;💩 条目含 zh/en/py/abbr 四类词;单测过 | ✅ 完成(2026-09-30) |
-| M1 | 热键 + 面板 + 搜索 + 上屏 | `Alt+E` 呼出 <50ms;打 `shi` 首位见 💩;Enter 上屏进记事本;Esc 即走 | ⬜ 未开始 |
-| M2 | 分类浏览 + 频率学习 + 信息栏 | 8 分类可切换;常用栏随使用更新 | ⬜ 未开始 |
-| M3 | 右键别名 + 文本扩展 + IME 检测 | `::shit ␣`→💩(英文态);中文 IME 开启时扩展自动失效不干扰 | ⬜ 未开始 |
-| M4 | 托盘 + 设置窗 + 自启动 + 打包 | PyInstaller 单 exe 可用;开机自启可开关;热键可改 | ⬜ 未开始 |
+| M1 | 热键 + 面板 + 搜索 + 上屏 | `Alt+E` 呼出 <50ms;打 `shi` 首位见 💩;Enter 上屏进记事本;Esc 即走 | ✅ 完成(2026-10-01) |
+| M2 | 分类浏览 + 频率学习 + 信息栏 | 8 分类可切换;常用栏随使用更新 | ✅ 完成(2026-10-01) |
+| M3 | 右键别名 + 文本扩展 + IME 检测 | `::shit ␣`→💩(英文态);中文 IME 开启时扩展自动失效不干扰 | ✅ 完成(2026-10-01) |
+| M4 | 托盘 + 设置窗 + 自启动 + 打包 | PyInstaller 单 exe 可用;开机自启可开关;热键可改 | ✅ 完成(2026-10-01) |
 
-**当前:** M0 完成,下一步 M1(热键 + 面板 + 搜索 + 上屏,最小可用产品)。
+**当前:** M4 完成,DESIGN §10 全里程碑 ✅。遗留 §11 手动验收清单(交付前用户逐项过)与重启验证自启动。
 
 ## 开发日志
+
+### 2026-10-01 · M4 托盘 + 设置窗 + 自启动 + 打包完成 ✅
+
+**产出:** config.py 增 autostart 读写(HKCU Run 键)、panel.py 增浅色 QSS + `apply_cfg` 热应用 + `fallback_notice` 信号、settings_ui.py 完整设置窗(热键录制/扩展/外观/自启/别名表格)、hotkey.py 增 `HookWatchdog`、app.py 托盘 + 设置 + 看护装配 + 启动自启同步、build.spec。测试 43 → 50 全过,ruff 无告警。
+
+**验收结果(离屏驱动 + 真机冒烟,三项验收标准全达成):**
+- **PyInstaller 单 exe 可用** ✓:build.spec(onefile/noconsole,`datas` 打包 index.json,`pathex=src`)产出 46MB `dist/EmojiPalette.exe`;启动正常(onefile 引导壳+真实进程双进程属预期)、启动行 `已隐藏 209 个…` 正常、单实例互斥体持有/拒绝/随进程释放、`taskkill //T` 树杀干净;
+- **开机自启可开关** ✓:`set_autostart` True/False 落册表/删值,设置窗与托盘两入口均同步 json+注册表(写失败回滚视觉态);
+- **热键可改** ✓:驱动录 `Alt+Shift+P` → 保存 → `reapply_runtime` 热改绑链路 14 项检查全过;换算函数 7 条回归测试(裸键拒绝/纯修饰拒绝/Meta↔windows/往返一致);
+- 离屏驱动另验:面板热应用(宽 700/格 38px/浅色 QSS 生效)、Watchdog 失活重挂(1 次 + 信号);真实应用托盘冒烟:启动、存活、干净退出无 stderr 残留。
+
+**设计偏差/决策(DESIGN 已同步):**
+1. **Watchdog 偏差(§6.7)**:原案「发测试键校验」弃用——keyboard 库全局注入在本机不可靠(M1 实测 57s 停顿)且会向用户前台应用打进按键;改为 30s QTimer 校验监听线程存活,失活置 `listening=False` 强制重启 + 业务层 `reapply_runtime` 全量重挂;
+2. **自启 json 为意图源(§6.8)**:应用启动时 json 与注册表不一致则以 json 为准写入——否则 DEFAULT `autostart:true` 只是纸面值,设置窗读注册表会永久显示未勾选;开发态 Run 命令 = `python -X utf8 -c "…内联 sys.path+main"`(Run 键无法设环境变量);
+3. **托盘图标程序化生成**:透明 QPixmap + QPainter 画 😀,免 .ico 资源文件与打包 datas 依赖;
+4. **热键换算安全规则**:`qt_to_keyboard_hotkey` 拒绝无修饰裸键(否则全局注册会吞掉正常打字)、纯修饰键、超 3 字符键名;`windows↔Meta` 双向映射;
+5. 设置窗不自作主张碰运行态:只改共享 cfg/aliases → 落盘 → 发 `applied` 信号,由 app 统一热改绑/重建扩展表/面板热应用(与 Watchdog 重挂共用 `reapply_runtime`);
+6. 别名管理集中在设置窗表格(面板右键菜单仍是就地快捷编辑,两入口共享同一 dict,互相同步)。
+
+**过程踩坑:**
+- M4 驱动首跑用匿名 lambda 挂/卸钩子 → `unhook` 传入不同 lambda 对象 KeyError,atexit 恢复未执行,**用户 config.json 被测试值污染**(立即手工还原);教训:凡挂/卸回调必须具名函数 + atexit 兜底应覆盖全部被写文件——本次终检又发现 aliases.json 在上次崩溃中漏恢复(测试别名残留),已还原为 `[]`;
+- git-bash 下 `taskkill /PID` 会被 MSYS 路径改写吞掉参数,须 `//PID //T //F`;
+- 打包后 `_MEIPASS` 定位数据/互斥体跨进程持有/onefile 双进程结构均符合预期,无需代码适配(仅 app.py 的 `_BASE` 一处分支)。
+
+**遗留:**
+- §11 手动验收清单(重启机器验自启、多应用上屏 hex 验证等)交由用户交付前逐项过;
+- 用户 json `autostart:true` 已物化为 Run 键(当前指向开发态命令);安装打包版后首次运行会自动改写为 exe 路径;
+- Watchdog 真实失活场景(系统摘钩)无法确定性复现,仅以模拟线程死亡验证逻辑。
+
+### 2026-10-01 · M3 右键别名 + 文本扩展 + IME 检测完成 ✅
+
+**产出:** expander.py(状态机 + suppress 钩子 + 信号桥)、ime.py(IME 开合 + 前台进程名)、config.py 增 aliases.json 读写、search.py 增 `set_aliases` 热更 + `expander_table`、sender.py `type_text` 增退格参数、panel.py 右键别名菜单 + 信息栏别名、app.py 扩展装配。测试 19 → 42 全过,ruff 无告警。
+
+**验收结果(真机 E2E,SendInput 真键注入 → LL 钩子 → WM_GETTEXT 读回):**
+- `::shit ␣` → 记事本精确得 `💩`(回删 6 + 注入,空格被吞);
+- 别名热更:保存 `xx`→💩 后纯别名表(关内置)`::xx ␣` → `💩💩`;
+- 未命中 `::zzz ␣` 原样放行,零打扰;
+- **IME 门禁(FR4.3)**:IMC_SETOPENSTATUS 开中文输入法后 `::shit ␣` 全程无介入(IME 正常转写,无新 💩、无任务、无吞键);
+- 频率学习:两次命中 → `frequency.json {"💩": 2}`;
+- 面板别名链路(离屏):信息栏 `别名: 翔, dabian` → 落盘 → 索引热更(查 `翔` 💩 居首)→ `aliases_changed` 信号 → 移除;
+- 真机启动冒烟:扩展钩子随配置装载,干净退出无残留。
+
+**设计决议与偏差(重要):**
+1. **keyboard 库 suppress 返回值与直觉相反**:`_winkeyboard.prepare_intercept` 约定 **True=放行 / False=拦截**(DESIGN §6.6 原文写反,已修正)。初版按「True=吞」实现,真机一跑所有键全被吞(记事本一个字都收不到)——LL 钩子层返回值语义必须以库源码为准;
+2. **注入不在钩子回调内做**:SendInput 在低级钩子回调内重入有 LowLevelHooksTimeout 风险(§6.7),任务经 `ExpandBridge.action` 信号排队到主线程执行(同 M1 热键桥模式);
+3. **门禁含「面板可见」**:面板搜索框打字也会过全局 suppress 钩子,不让路会吞掉面板内空格 —— gate = 总开关 ∧ 面板不可见 ∧ 非黑名单进程 ∧ IME 关闭;
+4. **gate 节流 500ms**(§6.5 复查节奏):IME/进程名是 syscall,IDLE→ARMED 必查,REC 内按时间窗复查;
+5. **回删与注入合并为单次 SendInput**(退格 VK 对 + Unicode 单元混排),不完整序列不会半截留在目标窗口;
+6. **扩展匹配表只取 kw_en/kw_abbr**(§6.6 原文如此):kw_py 不参与 —— `::` 录制是精确全等,拼音误触多;含空格/非拉丁词无法被 [a-z0-9] 缓冲命中,建表时剔除;别名同词覆盖内置(优先);
+7. **别名编辑 = 预填现状的单框整体编辑**(逗号分隔,支持中文别名入搜索、拉丁别名入扩展;FR3.5 的「添加/查看/编辑」三合一,移除 = 清空提交);QInputDialog 模态属 Qt 标准,数据链路离屏驱动验证;
+8. **E2E 键盘注入用 VkKeyScanW 真键事件**(shift 管理 + VK 击键):Unicode 注入(KEYEVENTF_UNICODE)在 LL 钩子层表现为 VK_PACKET,keyboard 库不报字符名,状态机看不见;真键事件与用户物理打键同路径;
+9. **IME 开关是全局输入模式**:IMC_SETOPENSTATUS 切中文态后跨进程残留(上轮 E2E 遗留中文态导致下轮全被门禁拦)——E2E 驱动必须先关 IME 再测英文路径,结束恢复;
+10. 意外收获:一次事故性验证 —— 全程 IME 开启下打字(`::shit ␣`→IME 转写 `::食堂`)扩展零介入,FR4.3 提前达标。
+
+**遗留:**
+- 黑名单进程旁路(FR4.4)逻辑在 gate 内(`foreground_process_name`),未单独真机验证(需前台黑名单进程;函数真机冒烟过);
+- 右键菜单的模态交互(输入框视觉)未自动化,数据链路已验;M4 设置窗别名表格(FR5.2)提供第二入口。
+
+
+
+### 2026-10-01 · M2 分类浏览 + 频率学习 + 信息栏完成 ✅
+
+**产出:** panel.py 重写为 M2 形态(搜索框 + 分类栏 + 网格 + 信息栏);search.py 增 `entries_for_group` / `top_frequent`;config.py 默认 480×300 → **600×440**、新增 `advanced.hide_unsupported`;app.py 增 QRawFont 字形过滤;测试 +2(共 19 全过),ruff 无告警。
+
+**验收结果:**
+- **9 分类可切换**(超验收线 8):常用 + 9 组,笑脸 169 项首项 😀、大组 People & Body 2261 项填充 32-37ms,顺序与索引一致(test_entries_for_group 断言);
+- **常用栏随使用更新(真机 E2E)**:frequency 复位 → popup(记事本)→ 搜 `shi` row2=💩 → 上屏 WM_GETTEXT 读回 `💩` → 第二周期呼出常用栏 💩 居首、frequency.json=`{"💩": 1}`;冷启动为固定常用条 23 项(非空);
+- 信息栏跟随高亮项(`大便 · pile of poo · U+1F4A9` + 40px 大图预览);
+- 截图目检:分类蓝色高亮、网格彩色 ~10 列、搜索模式分类栏整体淡化、无截断/重叠;
+- 真机启动冒烟:`[app] 已隐藏 209 个本机字体不支持的 emoji`,RSS 70MB,退出无残留进程。
+
+**设计决议与偏差(重要):**
+1. **双模式判定 = 搜索框文本**:非空 → 搜索模式(分类栏 `setEnabled(False)` 淡化,§5 允许隐藏或淡化取淡化);空 → 回当前分类浏览;
+2. **数字 1-9 直选仅搜索模式生效**(消歧决议:浏览模式数字照常入框当查询),Tab = 搜索↔分类切换且搜索→分类清空文本回浏览,分类栏可打字(自动跳回搜索框);
+3. **列数动态计算** `viewport().width() // 46` 作 PgUp/PgDn 步长,弃固定 10 列(窗口宽度可配);
+4. **常用栏 = 频率 top(recent_count)在前 + 固定常用条补足去重**,每次 popup 刷新(频率可能已变——clear() 对空文本不触发 textChanged,popup 末尾手动 `_load_category`);
+5. **豆腐隐藏按 QRawFont 实测字形,弃 ver 字段猜测**(坑 #12 最终方案):`QRawFont.fromFont(QFont("Segoe UI Emoji")).glyphIndexesForString(cp)` 返回 `[0]`(.notdef)即字体无此码点。`QFontMetrics.inFontUcs4` 对彩色字体全 False 不可用;QRawFont 在 offscreen 平台会崩 → `platformName()` 守卫;字体缺失/检测异常返回 None 宁可显示豆腐不误删。本机 3781 → 3572(隐藏 209,全部 E13.0+,逐机精确);
+6. 面板默认尺寸 600×440(§5 加分类栏+信息栏后 10 列需 ~600);DESIGN §8 已同步;
+7. offscreen 平台不发真实窗口激活,`hasFocus()` 断言无效 → 驱动一律断言行为效果(文本清空/enable 状态),真实焦点已在 M1 真机验证;
+8. 信息栏跟随**当前项**(填充后光标置 row0,↑↓/直选后即时更新)。
+
+**用户配置迁移(已告知):** `%APPDATA%\EmojiPalette\config.json` 手动更新 width 600 / height 440 / hide_unsupported true(深合并只补缺不覆盖旧值),热键保持测试期 `ctrl+alt+e`。
+
+**遗留:** 无。临时驱动/截图已清理,frequency.json 已复位。
+
+
+
+### 2026-10-01 · M1 最小可用产品完成 ✅(热键 + 面板 + 搜索 + 回车上屏)
+
+**产出:** config / search / sender / panel / hotkey / app / __main__ 七个模块从桩到实现,17 项测试全过,ruff 无告警。
+
+**验收结果(进程内确定性驱动,不做全局按键注入):**
+- 呼出延迟:首次 ~32ms、热态 ~16ms(<50ms ✓);
+- 搜 `shi` 冷启动 💩 第 2 位(数据事实,见下)→ Enter SendInput 真实进记事本(WM_GETTEXT 读回 `💩`);第二次呼出频率学习生效,`shi` 首位即 💩,再上屏读回 `💩💩`;
+- Esc 即走 / 点外关闭 / 上屏完成即隐藏,三途径验证;
+- 单实例:二实例弹「已在运行」并以 0 退出,首实例存活;
+- Ctrl+C:SIGINT → exec() 2.0s 返回,钩子全部卸载。
+
+**冷启动数据事实(与 DESIGN 示例不同,测试断言按实际值):**
+- `shi` 精确命中 kw_py 4 个,零频率码点升序为 👐(1F450)< 💩(1F4A9)< 🥄(1F944)< 🫡(1FAE1)→ **💩 是第 2 不是第 1**;用一次后频率加权即登顶;
+- `bb` 命中中 💩 第 7(非第 3);🫡 在本机 Win10 渲染为豆腐块(E13.0 字体不支持,坑 #12 的 `ver` 字段留到 M2 隐藏)。
+
+**设计偏差与踩坑(重要):**
+1. **单实例锁换命名互斥体**:DESIGN §9 原定 `QLocalServer.listen` 失败检测,但 PySide6 6.11.2 Windows 下 listen **不再互斥**(同进程双 listen 实测均成功,两实例可并存)→ 改 `Local\EmojiPalette` 命名互斥体 + `ERROR_ALREADY_EXISTS`,进程退出系统自动回收;
+2. **打分基数 10000 → 20000**:freq 上限 9999 × alias 权重 1.2 ≈ 12000 > 10000,高频前缀可反超低频精确命中 → 基数必须压过最大加权频率项(DESIGN §6.3 已同步修正);
+3. **INPUT union 必须写全三成员**(MOUSEINPUT/KEYBDINPUT/HARDWAREINPUT):§6.4 骨架只含 KEYBDINPUT,x64 下 sizeof=32≠40,SendInput 按错误步长读数组(DESIGN 已修);
+4. **前台锁两条路都要解**(坑 #2 扩展):① 面板自身呼出时 `activateWindow()` 会被后台进程前台锁拦下(面板可见但按键仍进原前台窗口)→ popup 内对自身 winId 跑 `restore_focus`;② 上屏时面板 hide 后激活飘走 → `restore_focus` 改**预算式轮询(300ms,首轮后 Alt 轻敲解锁)**,原 50ms 轮询在记事本冷切换下不够;
+5. **失活关闭需 300ms 宽限**:suppress=False 下热键直通前台应用(Alt+E 呼出 VS Code 编辑菜单抢激活),ActivationChange 不能立即据此关面板;
+6. **Ctrl+C 需 100ms 保活 QTimer**:Windows 下 Qt exec() 阻塞 Python 信号检查,无保活则 SIGINT 永不触发;
+7. **频率即写盘**(FR5.4),与 §4.3 批量落盘矛盾,M4 再议优化;
+8. 同 emoji 多词命中取最高分再排序(§6.3 留白);↑↓ 逐项移动(非整行);Esc 用 eventFilter 而非 QShortcut(QTest 无法触发快捷键);❤️ 等变体序列的常用条用元组存(按码点迭代会拆开);
+9. **keyboard 库全局注入不可靠**(本机实测 57s 停顿、延迟重放)→ 验收一律进程内确定性驱动;
+10. uv venv 的 `python.exe` 是跳板进程(真实解释器另有 PID),自动化测试按 pid 找窗口/杀进程树都会踩坑。
+
+**遗留:**
+- 用户 config.json 热键当前为 `ctrl+alt+e`(测试期临时值,Alt+E 与 VS Code 菜单冲突所致);恢复默认改 `%APPDATA%\EmojiPalette\config.json` 的 `hotkey` 字段即可;
+- 🫡 等 E13.0+ 字符在 Win10 显示豆腐块,M2 用 `ver` 字段隐藏。
 
 ### 2026-09-30 · M0 数据管道完成 ✅
 
