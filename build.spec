@@ -1,8 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller 打包(DESIGN.md §9/§10 M4):单 exe、无控制台。
+"""PyInstaller 打包:单 exe、无控制台、带 😀 图标。
 
 datas 把 data/index.json 打进 _MEIPASS/data/(app.py 以 _MEIPASS 定位);
-pathex 指向 src/ 使 emoji_palette 包可被 Analysis 静态发现。
+pathex 指向 src/ 使 emoji_palette 包可被 Analysis 静态发现;
+icon 由 scripts/make_icon.py 生成(assets/icon.ico)。
 构建:pyinstaller build.spec --noconfirm
 """
 
@@ -29,6 +30,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     name="EmojiPalette",
+    icon=str(ROOT / "assets" / "icon.ico"),
     console=False,
     disable_windowed_traceback=False,
     upx=False,

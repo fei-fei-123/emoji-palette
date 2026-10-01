@@ -1,6 +1,5 @@
 {
-    // VS Code 调试配置。解释器统一用 .venv(uv 托管 CPython 3.12,
-    // 环境坑见 docs/DEVLOG.md「依赖环境攻坚」)。
+    // VS Code 调试配置。解释器统一用项目 .venv(见 settings.json)。
     "version": "0.2.0",
     "configurations": [
         {
@@ -36,11 +35,30 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "✅ pytest 全部测试",
+            "name": "🧪 pytest 全部测试",
             "type": "debugpy",
             "request": "launch",
             "module": "pytest",
             "args": ["-v", "${workspaceFolder}/tests"],
+            "cwd": "${workspaceFolder}",
+            "env": { "PYTHONUTF8": "1" },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "📦 生成应用图标 (scripts/make_icon.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/make_icon.py",
+            "cwd": "${workspaceFolder}",
+            "env": { "PYTHONUTF8": "1" },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "📦 打包单文件 exe (PyInstaller)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pyinstaller",
+            "args": ["--noconfirm", "build.spec"],
             "cwd": "${workspaceFolder}",
             "env": { "PYTHONUTF8": "1" },
             "console": "integratedTerminal"
