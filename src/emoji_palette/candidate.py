@@ -20,6 +20,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
+from emoji_palette import sender
+
 user32 = ctypes.windll.user32
 
 VK_LBUTTON = 0x01
@@ -38,19 +40,11 @@ _BAR_FG_DIM = {"dark": (150, 150, 150, 255), "light": (120, 120, 120, 255)}
 _BAR_RADIUS = 6.0
 
 
-class _GUITHREADINFO(ctypes.Structure):
-    _fields_ = [("cbSize", wt.DWORD), ("flags", wt.DWORD),
-                ("hwndActive", wt.HWND), ("hwndFocus", wt.HWND),
-                ("hwndCapture", wt.HWND), ("hwndCaret", wt.HWND),
-                ("rcCaret", wt.RECT)]
-
-
-user32.GetGUIThreadInfo.argtypes = (wt.DWORD, ctypes.POINTER(_GUITHREADINFO))
-user32.GetGUIThreadInfo.restype = wt.BOOL
+# GetGUIThreadInfo / GetAsyncKeyState 复用 sender 的声明与结构体
+# (user32 进程级共享,自设 argtypes 曾排斥 sender 调用 + caret 错位)。
+# 仅声明本模块独有的 ClientToScreen。
 user32.ClientToScreen.argtypes = (wt.HWND, ctypes.POINTER(wt.POINT))
 user32.ClientToScreen.restype = wt.BOOL
-user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
-user32.GetAsyncKeyState.restype = ctypes.c_short
 
 
 class CandidateBar(QWidget):
@@ -184,8 +178,8 @@ class CandidateBar(QWidget):
 
     def _caret_screen_pos(self) -> QPoint | None:
         """前台窗口 caret 屏幕坐标;无 caret → None。"""
-        info = _GUITHREADINFO()
-        info.cbSize = ctypes.sizeof(_GUITHREADINFO)
+        info = sender.GUITHREADINFO()
+        info.cbSize = ctypes.sizeof(sender.GUITHREADINFO)
         if not user32.GetGUIThreadInfo(0, ctypes.byref(info)):
             return None
         if not info.hwndCaret:

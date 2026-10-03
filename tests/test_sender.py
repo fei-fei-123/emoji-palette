@@ -93,3 +93,16 @@ def test_held_modifiers_samples_only_pressed(monkeypatch):
     # 全松开 → 空表,注入序列不夹带修饰键事件
     monkeypatch.setattr(sender.user32, "GetAsyncKeyState", lambda vk: 0)
     assert _held_modifiers() == []
+
+
+def test_gui_threadinfo_shared_declaration():
+    # 回归:user32 进程级共享,自设 argtypes 会排斥他处结构体
+    # (ArgumentError);约定不设,结构体统一复用 sender.GUITHREADINFO
+    from emoji_palette import candidate  # noqa: F401 — 导入即应用模块级声明
+
+    assert sender.user32.GetGUIThreadInfo.argtypes is None
+    # 布局完整:缺 hwndMenuOwner/hwndMoveSize 会让 hwndCaret/rcCaret 错位
+    names = [f[0] for f in sender.GUITHREADINFO._fields_]
+    assert names == ["cbSize", "flags", "hwndActive", "hwndFocus",
+                     "hwndCapture", "hwndMenuOwner", "hwndMoveSize",
+                     "hwndCaret", "rcCaret"]

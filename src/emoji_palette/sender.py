@@ -84,7 +84,8 @@ user32.GetForegroundWindow.restype = wt.HWND
 user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
 user32.GetAsyncKeyState.restype = ctypes.c_short
 # GetWindowThreadProcessId / GetGUIThreadInfo 不设 argtypes:
-# 前者项目内已有单参调用(只要 tid 不要 pid),设了会破坏它们
+# 前者项目内有单参调用;后者 user32 进程级共享,一处声明会排斥
+# 他处同名结构体(ArgumentError)。GUITHREADINFO 统一用本模块这份。
 user32.SetForegroundWindow.argtypes = (wt.HWND,)
 user32.SetForegroundWindow.restype = wt.BOOL
 user32.keybd_event.argtypes = (ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_ulong,
