@@ -113,6 +113,8 @@ def main() -> int:
     cfg = config.load_config()
     if cfg["autostart"] != config.is_autostart():
         config.set_autostart(cfg["autostart"])  # json 意图 → 注册表
+    elif cfg["autostart"]:
+        config.refresh_autostart()  # 已启用但命令行模板过期 → 原位重写
 
     if not INDEX_PATH.exists():
         QMessageBox.critical(

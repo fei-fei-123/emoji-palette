@@ -158,12 +158,13 @@ AUTOSTART_NAME = "EmojiPalette"
 
 
 def autostart_command() -> str:
-    """自启动命令行:打包态 = exe 本体;开发态 = python -c 引导带 src 路径
-    (Run 键只是命令行、无环境变量,`python -m` 找不到包)。"""
+    """自启动命令行:打包态 = exe 本体;开发态 = pythonw -c 引导带 src 路径
+    (Run 键无环境变量,`python -m` 找不到包;pythonw 免控制台黑窗)。"""
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}"'
     src = Path(__file__).resolve().parents[1]
-    return (f'"{sys.executable}" -X utf8 -c '
+    exe = Path(sys.executable).with_name("pythonw.exe")
+    return (f'"{exe if exe.exists() else sys.executable}" -X utf8 -c '
             f'"import sys; sys.path.insert(0, r\'{src}\'); '
             f'from emoji_palette.app import main; main()"')
 
@@ -195,3 +196,15 @@ def is_autostart() -> bool:
             return True
     except OSError:
         return False
+
+
+def refresh_autostart() -> None:
+    """已启用但注册表命令行与当前模板不一致时原位重写(模板演进自愈)。"""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY,
+                            0, winreg.KEY_READ) as k:
+            stored, _ = winreg.QueryValueEx(k, AUTOSTART_NAME)
+        if stored != autostart_command():
+            set_autostart(True)
+    except OSError:
+        pass  # 未启用:交给启动时 json 意图同步处理
