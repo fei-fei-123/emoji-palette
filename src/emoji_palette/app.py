@@ -36,10 +36,21 @@ _kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, wt.BOOL, wt.LPCWSTR)
 _kernel32.CreateMutexW.restype = wt.HANDLE
 
 
+def _is_flag_sequence(cps: list[int]) -> bool:
+    """旗帜类序列:地区指示对(1F1E6-1F1FF)或 tag 细分旗(E0020-E007F)。
+
+    Windows 的 Segoe UI Emoji 无旗面字形,只会渲染成「CN」式字母缩写,
+    按不支持处理。
+    """
+    return any(0x1F1E6 <= cp <= 0x1F1FF or 0xE0020 <= cp <= 0xE007F
+               for cp in cps)
+
+
 def _unsupported_filter():
     """按本机 Segoe UI Emoji 实际字形覆盖过滤(无此码点 = 渲染豆腐块)。
 
-    QRawFont.glyphIndexesForString 返回 [0](.notdef)即该字体无此码点。
+    QRawFont.glyphIndexesForString 返回 [0](.notdef)即该字体无此码点;
+    旗帜类序列另由 _is_flag_sequence 判定(单码点检测探不到连字缺失)。
     offscreen 平台下 QRawFont 会崩,非 Windows 平台不过滤;
     返回 None 表示无法检测,宁可显示豆腐也不误删。
     """
@@ -55,7 +66,10 @@ def _unsupported_filter():
     cache: dict[int, bool] = {}
 
     def supported(entry: dict) -> bool:
-        cp0 = int(entry["cp"].split()[0], 16)
+        cps = [int(x, 16) for x in entry["cp"].split()]
+        if _is_flag_sequence(cps):
+            return False
+        cp0 = cps[0]
         if cp0 not in cache:
             cache[cp0] = raw.glyphIndexesForString(chr(cp0)) != [0]
         return cache[cp0]
