@@ -14,6 +14,7 @@ from PySide6.QtCore import (
     QRectF,
     QSize,
     Qt,
+    QTimer,
     Signal,
 )
 from PySide6.QtGui import (
@@ -158,6 +159,9 @@ _PANEL_BORDER: dict[str, tuple[int, int, int, int]] = {
     "light": (160, 160, 160, 220),
 }
 _PANEL_RADIUS = 8.0
+# keep-open 提交后延迟抢回前台(ms):SendInput 字符按出队时刻的前台窗口路由,
+# 立即抢回会与字符路由竞态导致丢失(实测复现);需留足路由时间
+_REGRAB_DELAY_MS = 120
 
 
 class _EmojiDelegate(QStyledItemDelegate):
@@ -515,10 +519,14 @@ class EmojiPanel(QWidget):
         if ok:
             config.bump_frequency(char)
         if keep_open and self.isVisible():
-            self._reactivate_after_submit()
+            # 延迟抢回前台:SendInput 字符按出队时刻的前台窗口路由,
+            # 立即抢回会把字符路由进面板队列(实测 <1ms 即丢失)
+            QTimer.singleShot(_REGRAB_DELAY_MS, self._reactivate_after_submit)
 
     def _reactivate_after_submit(self) -> None:
-        """keep-open:抢回前台与焦点,选中项下移一行(连续上屏)。"""
+        """keep-open:抢回前台与焦点,选中项保持不动。"""
+        if not self.isVisible():
+            return
         self._hold_grace = time.monotonic() + 0.6
         sender.restore_focus(int(self.winId()))
         if self.search_edit.text():
@@ -526,9 +534,6 @@ class EmojiPanel(QWidget):
             self.search_edit.setCursorPosition(len(self.search_edit.text()))
         else:
             self.setFocus()
-        count = self.grid.count()
-        if count:
-            self._select_row(min(max(self.grid.currentRow(), 0) + 1, count - 1))
 
     def _apply_grid_metrics(self) -> None:
         """网格字体/格宽/delegate 随 icon_size 与主题重建。"""

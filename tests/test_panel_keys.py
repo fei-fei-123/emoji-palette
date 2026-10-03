@@ -223,7 +223,7 @@ def test_submit_keep_open_stays_visible(monkeypatch):
     p._submit(entry, keep_open=p._keep_open_for(False))  # 走配置判定路径
     assert len(p._injected) == 1
     assert p.isVisible()  # 配置恒开:面板不关
-    assert p.grid.currentRow() == 1  # 选中项下移一行(连续上屏)
+    assert p.grid.currentRow() == 0  # 选中项保持不动
 
 
 class _NoActiveApp:
