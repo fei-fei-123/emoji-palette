@@ -226,6 +226,37 @@ def test_submit_keep_open_stays_visible(monkeypatch):
     assert p.grid.currentRow() == 0  # 选中项保持不动
 
 
+def test_submit_keep_open_posts_without_focus_switch(monkeypatch):
+    """_target_focus 有效:WM_CHAR 直投,不触键盘注入(焦点不离面板)。"""
+    p = _make_panel(monkeypatch, close_after_submit=False)
+    p.popup(0, from_hotkey=False)
+    posted = []
+    monkeypatch.setattr(panel_mod.sender, "post_char",
+                        lambda hwnd, text: posted.append((hwnd, text)) or True)
+    p._target_focus = 0xABCD  # popup(0) 下真实抓拍为 0,此处置场景值
+    entry = p.grid.item(0).data(Qt.ItemDataRole.UserRole)
+    p._submit(entry, keep_open=True)
+    assert posted == [(0xABCD, entry["char"])]
+    assert p._injected == []  # 未走 type_text 键盘注入
+    assert p.isVisible()
+
+
+def test_submit_keep_open_post_failure_falls_back(monkeypatch):
+    """投递失败回落 type_text 键盘注入,并保留延迟抢回调度。"""
+    p = _make_panel(monkeypatch, close_after_submit=False)
+    p.popup(0, from_hotkey=False)
+    regrab = []
+    monkeypatch.setattr(panel_mod.sender, "post_char", lambda hwnd, text: False)
+    monkeypatch.setattr(panel_mod.QTimer, "singleShot",
+                        lambda ms, fn: regrab.append(ms))
+    p._target_focus = 0xABCD
+    entry = p.grid.item(0).data(Qt.ItemDataRole.UserRole)
+    p._submit(entry, keep_open=True)
+    assert p._injected == [entry["char"]]
+    assert regrab == [panel_mod._REGRAB_DELAY_MS]
+    assert p.isVisible()
+
+
 class _NoActiveApp:
     """伪造 QApplication.activeWindow()→None(panel.event 失活判定用)。"""
 

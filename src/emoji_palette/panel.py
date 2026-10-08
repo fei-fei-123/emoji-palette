@@ -203,6 +203,8 @@ class EmojiPanel(QWidget):
         self._index = index
         self._aliases = aliases if aliases is not None else {}  # 共享引用,编辑即改
         self._target_hwnd = 0
+        # keep-open WM_CHAR 直投的目标焦点子窗口;popup 抓拍(见 popup)
+        self._target_focus = 0
         self._popup_ts = 0.0  # 呼出时刻(monotonic),失活宽限用
         self._hold_grace = 0.0  # keep-open 提交的失活豁免截止
         self._tail: dict | None = None  # 热键末键残留过滤状态
@@ -310,6 +312,9 @@ class EmojiPanel(QWidget):
     def popup(self, target_hwnd: int, from_hotkey: bool = True) -> None:
         """呼出:光标屏幕定位 + 边缘收拢,记录注入目标窗口。"""
         self._target_hwnd = target_hwnd
+        # 此刻目标仍是前台:抓拍其焦点子窗口供 keep-open 投递 WM_CHAR。
+        # 面板抢到前台后目标线程焦点清 NULL,提交时再查只会得 0
+        self._target_focus = sender.focus_window(target_hwnd)
         self._popup_ts = time.monotonic()
         pt = QCursor.pos()
         scr = QGuiApplication.screenAt(pt) or QGuiApplication.primaryScreen()
@@ -506,21 +511,30 @@ class EmojiPanel(QWidget):
     def _submit(self, entry: dict, keep_open: bool = False) -> None:
         char = entry["char"]
         if keep_open:
-            # 先置失活豁免再让焦点去目标应用,否则 event() 会把「面板失活」
+            # 先置失活豁免再动焦点,否则 event() 会把「面板失活」
             # 误判为点外关闭,注入中途关面板
             self._hold_grace = time.monotonic() + 0.6
         else:
             self.dismiss()
-        ok = sender.type_text(self._target_hwnd, char)
+        ok = False
+        regrab = True  # 走了键盘注入(切前台)路径才需要抢回
+        if keep_open and self._target_focus:
+            # keep-open 首选 WM_CHAR 直投:面板不失焦——无前台切换、
+            # 无 120ms 盲窗,连击任意速度不掉击(实测盲窗内二击漏进
+            # 目标应用);投递失败回落键盘注入
+            ok = sender.post_char(self._target_focus, char)
+            regrab = not ok
+        if not ok:
+            ok = sender.type_text(self._target_hwnd, char)
         if not ok and self._cfg["advanced"].get("fallback_to_clipboard", True):
             ok = sender.clipboard_fallback(char)
             if ok:
                 self.fallback_notice.emit(char)
         if ok:
             config.bump_frequency(char)
-        if keep_open and self.isVisible():
-            # 延迟抢回前台:SendInput 字符按出队时刻的前台窗口路由,
-            # 立即抢回会把字符路由进面板队列(实测 <1ms 即丢失)
+        if keep_open and regrab and self.isVisible():
+            # 回落路径专用延迟抢回:SendInput 字符按出队时刻的前台窗口
+            # 路由,立即抢回会与字符路由竞态导致丢失(实测 <1ms 即丢失)
             QTimer.singleShot(_REGRAB_DELAY_MS, self._reactivate_after_submit)
 
     def _reactivate_after_submit(self) -> None:

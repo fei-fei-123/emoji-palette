@@ -1,7 +1,11 @@
-"""SendInput Unicode 注入 / 焦点还原 / 剪贴板降级(纯 ctypes,零 Qt 依赖)。
+"""SendInput Unicode 注入 / WM_CHAR 直投 / 焦点还原 / 剪贴板降级
+(纯 ctypes,零 Qt 依赖)。
 
-上屏时序(调用方负责):先 hide 面板 → 还原焦点 → 注入。
-非 BMP 字符按 UTF-16 代理对逐 code unit 注入,不使用剪贴板(降级除外)。
+上屏时序(调用方负责):
+- keep-open 首选 post_char 消息直投,面板不失焦,零前台切换;
+- 键盘注入路径先 hide 面板 → 还原焦点 → 注入(keep-open 回落提交后
+  由调用方延迟抢回前台)。
+非 BMP 字符按 UTF-16 代理对逐 code unit 处理,不使用剪贴板(降级除外)。
 """
 
 import ctypes
@@ -22,6 +26,7 @@ VK_RCONTROL: int = 0xA3
 VK_LMENU: int = 0xA4
 VK_RMENU: int = 0xA5
 VK_BACK: int = 0x08
+WM_CHAR: int = 0x0102
 CF_UNICODETEXT: int = 13
 GMEM_MOVEABLE: int = 0x0002
 
@@ -83,6 +88,8 @@ user32.GetForegroundWindow.argtypes = ()
 user32.GetForegroundWindow.restype = wt.HWND
 user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
 user32.GetAsyncKeyState.restype = ctypes.c_short
+user32.PostMessageW.argtypes = (wt.HWND, ctypes.c_uint, wt.WPARAM, wt.LPARAM)
+user32.PostMessageW.restype = wt.BOOL
 # GetWindowThreadProcessId / GetGUIThreadInfo 不设 argtypes:
 # 前者项目内有单参调用;后者 user32 进程级共享,一处声明会排斥
 # 他处同名结构体(ArgumentError)。GUITHREADINFO 统一用本模块这份。
@@ -110,7 +117,7 @@ def get_foreground_window() -> int:
     return user32.GetForegroundWindow() or 0
 
 
-def _focus_window(hwnd: int) -> int:
+def focus_window(hwnd: int) -> int:
     """所在线程当前的焦点窗口(0=无焦点,即上屏字符的空路由)。"""
     pid = wt.DWORD()
     tid = user32.GetWindowThreadProcessId(wt.HWND(hwnd), ctypes.byref(pid))
@@ -140,7 +147,7 @@ def restore_focus(hwnd: int, budget_s: float = 0.3) -> bool:
         for _ in range(4):  # 每轮 4 次 × 5ms 校验
             if user32.GetForegroundWindow() == hwnd:
                 for _ in range(20):  # 再等焦点落位,最多 100ms
-                    if _focus_window(hwnd):
+                    if focus_window(hwnd):
                         return True
                     time.sleep(0.005)
                 return True
@@ -201,6 +208,26 @@ def _build_keystrokes(text: str, backspaces: int,
         arr[i].ki = KEYBDINPUT(vk, _SCAN_BY_VK[vk], 0, 0, 0)
         i += 1
     return arr, i
+
+
+def post_char(hwnd: int, text: str) -> bool:
+    """向 hwnd 逐 code unit 投递 WM_CHAR(代理对各一条)。
+
+    keep-open 上屏首选路径:面板不失焦,无前台切换、无键盘注入、无
+    盲窗,连击任意速度不掉击。VK_PACKET 注入在目标应用内最终产生的
+    就是同样的 WM_CHAR 序列,消息泵应用的兼容面等同。PostMessage 跨
+    进程异步无回执:返回 False 仅代表投递失败(hwnd 失效/UIPI 拦截/
+    队列满),应用忽略与送达在外部不可区分,由调用方决定是否回落。
+    """
+    if not hwnd or not text:
+        return False
+    data = text.encode("utf-16-le")
+    for i in range(0, len(data), 2):
+        unit = int.from_bytes(data[i:i + 2], "little")
+        if not user32.PostMessageW(wt.HWND(hwnd), WM_CHAR,
+                                   wt.WPARAM(unit), wt.LPARAM(0)):
+            return False  # 中途失败即止,避免半截代理对
+    return True
 
 
 def type_text(hwnd: int, text: str, backspaces: int = 0) -> bool:

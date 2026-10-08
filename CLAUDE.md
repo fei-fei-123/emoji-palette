@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概要
 
-Windows 表情快速上屏工具:全局热键呼出面板 + `::` 文本扩展,四路搜索(中文/英文/拼音全拼/拼音缩写),纯 Unicode SendInput 注入上屏。技术栈:PySide6 + keyboard 库 + 纯 ctypes Win32。仅支持 Windows(大量 user32/imm32/winreg 调用)。
+Windows 表情快速上屏工具:全局热键呼出面板 + `::` 文本扩展,四路搜索(中文/英文/拼音全拼/拼音缩写),上屏走 WM_CHAR 直投(keep-open 首选)或 SendInput 注入(回落)。技术栈:PySide6 + keyboard 库 + 纯 ctypes Win32。仅支持 Windows(大量 user32/imm32/winreg 调用)。
 
 注释、文档字符串、UI 文案、commit message 均用中文,保持一致。
 
@@ -65,11 +65,12 @@ python -m PyInstaller build.spec --noconfirm   # 打包单文件 exe(模块名�
 
 ### 上屏(sender.py,纯 ctypes 零 Qt)
 
-- `type_text`:UTF-16 逐 code unit(含代理对)合并为单次 SendInput(原子性),可选前置 N 次退格(扩展回删用)
-- 修饰键夹逼(硬约束,`_build_keystrokes`):注入瞬间物理按住的 Shift/Ctrl/Alt(左右区分)批头合成松开——按住的 Shift 会让 VK_PACKET 字符被键盘态转写丢弃;**批尾按原键重压恢复**(带物理扫描码 `_SCAN_BY_VK`):不重压则 OS 修饰键状态被清空,keep-open 连击第二击失去 ShiftModifier、断成 dismiss;重压不带物理扫描码会毒化 keyboard 库热键匹配(面板无法再唤出的根因)
-- `restore_focus` 等前台切换**且目标线程焦点窗口落位**(`GetGUIThreadInfo`):面板前台期间目标 WM_KILLFOCUS 后线程焦点为 NULL,目标处理 WM_SETFOCUS 是异步的,抢跑注入 = VK_PACKET 路由到空焦点静默丢弃(keep-open 连击丢字的根因)
-- keep-open 提交后延迟 `_REGRAB_DELAY_MS` 抢回前台:SendInput 字符按出队时刻的前台窗口路由,立即抢回会与路由竞态导致字符丢失(panel.py `_submit`)
-- 时序约定:先 hide 面板 → `restore_focus`(失败敲 Alt 解前台锁)→ 注入
+- **keep-open 首选 `post_char` 消息直投**:向 popup 时抓拍的目标焦点子窗口(`panel._target_focus`,必须在面板抢前台**之前**抓拍——此后目标线程焦点清 NULL 查不到)逐 code unit PostMessage WM_CHAR。面板不失焦 → 零前台切换、零键盘注入、零盲窗,连击任意速度不掉击。VK_PACKET 注入在目标内最终产生的就是同样的 WM_CHAR 序列,消息泵应用兼容面等同;PostMessage 无回执,应用忽略与送达外部不可区分
+- `type_text`(键盘注入路径,dismiss 与 post 失败回落用):UTF-16 逐 code unit(含代理对)合并为单次 SendInput(原子性),可选前置 N 次退格(扩展回删用)
+- 修饰键夹逼(硬约束,`_build_keystrokes`,仅键盘注入路径):注入瞬间物理按住的 Shift/Ctrl/Alt(左右区分)批头合成松开——按住的 Shift 会让 VK_PACKET 字符被键盘态转写丢弃;**批尾按原键重压恢复**(带物理扫描码 `_SCAN_BY_VK`):不重压则 OS 修饰键状态被清空,keep-open 连击第二击失去 ShiftModifier、断成 dismiss;重压不带物理扫描码会毒化 keyboard 库热键匹配(面板无法再唤出的根因)
+- `restore_focus` 等前台切换**且目标线程焦点窗口落位**(`GetGUIThreadInfo`):面板前台期间目标 WM_KILLFOCUS 后线程焦点为 NULL,目标处理 WM_SETFOCUS 是异步的,抢跑注入 = VK_PACKET 路由到空焦点静默丢弃(回落路径丢字的根因)
+- 回落路径 keep-open 提交后延迟 `_REGRAB_DELAY_MS` 抢回前台:SendInput 字符按出队时刻的前台窗口路由,立即抢回会与路由竞态导致字符丢失(panel.py `_submit`)
+- 键盘注入时序约定:先 hide 面板 → `restore_focus`(失败敲 Alt 解前台锁)→ 注入
 - 失败降级 `clipboard_fallback`(如提权窗口),托盘气泡提示(每小时至多一次)
 
 ### IME 让位(ime.py)

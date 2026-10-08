@@ -95,6 +95,51 @@ def test_held_modifiers_samples_only_pressed(monkeypatch):
     assert _held_modifiers() == []
 
 
+# ── post_char:keep-open WM_CHAR 直投(纯构造断言,不骚扰桌面)──
+
+
+def _ints(seq):
+    """ctypes 包装(HWND/WPARAM/LPARAM)规范化为 int,便于整批断言。"""
+    return [getattr(v, "value", v) for v in seq]
+
+
+def test_post_char_splits_utf16_units(monkeypatch):
+    # WM_CHAR 逐 code unit:代理对各一条,与 VK_PACKET 在目标应用内
+    # 产生的 WM_CHAR 序列一致
+    sent = []
+
+    def fake_post(hwnd, msg, wparam, lparam):
+        sent.append(tuple(_ints((hwnd, msg, wparam, lparam))))
+        return 1
+
+    monkeypatch.setattr(sender.user32, "PostMessageW", fake_post)
+    assert sender.post_char(0x1234, "😀") is True
+    assert sent == [(0x1234, 0x0102, 0xD83D, 0), (0x1234, 0x0102, 0xDE00, 0)]
+
+
+def test_post_char_ascii_units_in_order(monkeypatch):
+    sent = []
+    monkeypatch.setattr(sender.user32, "PostMessageW",
+                        lambda h, m, w, l: sent.append(_ints((w,))[0]) or 1)
+    assert sender.post_char(0x1234, "ab") is True
+    assert sent == [0x61, 0x62]
+
+
+def test_post_char_guards_and_failure(monkeypatch):
+    calls = []
+
+    def fail_immediately(hwnd, msg, wparam, lparam):
+        calls.append(_ints((wparam,))[0])
+        return 0  # 首投即败(UIPI 拦截/队列满类)
+
+    monkeypatch.setattr(sender.user32, "PostMessageW", fail_immediately)
+    assert sender.post_char(0, "a") is False       # 无效 hwnd:不投递
+    assert calls == []
+    assert sender.post_char(0x1234, "") is False   # 空文本
+    assert sender.post_char(0x1234, "a") is False  # 投递失败如实上报
+    assert calls == [0x61]
+
+
 def test_gui_threadinfo_shared_declaration():
     # 回归:user32 进程级共享,自设 argtypes 会排斥他处结构体
     # (ArgumentError);约定不设,结构体统一复用 sender.GUITHREADINFO
